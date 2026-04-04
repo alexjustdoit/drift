@@ -47,6 +47,32 @@ One-time setup steps. Do these in order.
    - Copy the URL: `https://notion.so/Your-DB-Name-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
    - The 32-character string after the last `-` is your `NOTION_DB_ID`
 
+### Additional fields for v2 (add to same database)
+
+| Property name   | Type   |
+|-----------------|--------|
+| Midday Energy   | Number |
+| Midday Mood     | Number |
+| Working On      | Text   |
+
+---
+
+## 2b. Create Time Audit Database (for /time command)
+
+1. Create a second full-page database named `Time Audit`
+2. Properties:
+
+| Property name   | Type   |
+|-----------------|--------|
+| Name            | Title  |
+| Date            | Date   |
+| Planned Minutes | Number |
+| Actual Minutes  | Number |
+| Productivity    | Number |
+
+3. Share it with the Drift integration (same as step 2.5 above)
+4. Get the database ID (same method as step 2.6) → this is your `NOTION_TIME_AUDIT_DB_ID`
+
 ---
 
 ## 3. Deploy to Vercel

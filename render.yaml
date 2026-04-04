@@ -19,8 +19,14 @@ services:
       - key: NOTION_DB_ID
         sync: false
       - key: MORNING_TIME
-        value: "08:00"       # HH:MM — change to your preferred time
+        value: "08:00"
       - key: EVENING_TIME
-        value: "20:00"       # HH:MM — change to your preferred time
+        value: "20:00"
+      - key: DIGEST_DAY
+        value: "6"           # 0=Mon … 6=Sun
+      - key: DIGEST_TIME
+        value: "18:00"
       - key: TIMEZONE
-        value: "America/New_York"  # your timezone
+        value: "America/New_York"
+      - key: NOTION_TIME_AUDIT_DB_ID
+        sync: false          # optional — enables /time command

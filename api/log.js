@@ -56,6 +56,15 @@ function buildProperties(body) {
   if (body.caffeineCups !== undefined)
     props['Caffeine Cups'] = { number: body.caffeineCups };
 
+  if (body.middayEnergy !== undefined)
+    props['Midday Energy'] = { number: body.middayEnergy };
+
+  if (body.middayMood !== undefined)
+    props['Midday Mood'] = { number: body.middayMood };
+
+  if (body.workingOn !== undefined)
+    props['Working On'] = { rich_text: [{ text: { content: body.workingOn } }] };
+
   if (body.afternoonEnergy !== undefined)
     props['Afternoon Energy'] = { number: body.afternoonEnergy };
 

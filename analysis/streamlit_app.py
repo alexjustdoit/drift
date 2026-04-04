@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from anthropic import Anthropic
-from notion_client import fetch_logs
+from notion_client import fetch_logs, fetch_time_audit
 
 # ── Page config ──────────────────────────────────────────────────────────────
 
@@ -115,8 +115,8 @@ st.divider()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab_overview, tab_patterns, tab_wins, tab_ai = st.tabs(
-    ["Overview", "Patterns", "Win Log", "AI Report"]
+tab_overview, tab_patterns, tab_wins, tab_ai, tab_time = st.tabs(
+    ["Overview", "Patterns", "Win Log", "AI Report", "Time Audit"]
 )
 
 # ═══════════════════════════════════════════════════════
@@ -427,3 +427,115 @@ Be direct and specific. Use actual numbers from the data. No fluff."""
                 use_container_width=True,
                 hide_index=True,
             )
+
+# ═══════════════════════════════════════════════════════
+# TAB 5 — TIME AUDIT
+# ═══════════════════════════════════════════════════════
+
+with tab_time:
+    ta = fetch_time_audit(days_back=days_map[window])
+
+    if ta.empty:
+        if not st.secrets.get("NOTION_TIME_AUDIT_DB_ID", ""):
+            st.markdown("""
+            <div class="no-data">
+                <h4>Time Audit not set up</h4>
+                <p>Add <code>NOTION_TIME_AUDIT_DB_ID</code> to your Streamlit secrets,<br>
+                then create a Time Audit database in Notion.<br>
+                See SETUP.md for the schema.</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="no-data">
+                <h4>No time audit entries yet</h4>
+                <p>Use <code>/time</code> in the Drift Telegram bot to log your first entry.</p>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        ta = ta[ta["date"] >= cutoff].copy()
+        ta = ta.dropna(subset=["planned_minutes", "actual_minutes"])
+
+        if ta.empty:
+            st.info("No time audit entries in this range.")
+        else:
+            # KPI row
+            total_planned = ta["planned_minutes"].sum()
+            total_actual  = ta["actual_minutes"].sum()
+            ratio         = total_actual / total_planned if total_planned else 1
+            avg_prod      = ta["productivity"].dropna().mean()
+            entries       = len(ta)
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.markdown(f"""<div class="metric-card">
+                  <div class="metric-val">{int(total_actual / 60)}h {int(total_actual % 60)}m</div>
+                  <div class="metric-label">Actual time logged</div></div>""", unsafe_allow_html=True)
+            with c2:
+                color = SUCCESS if ratio <= 1.1 else "#f87171"
+                label = "on track" if ratio <= 1.1 else "over estimate"
+                st.markdown(f"""<div class="metric-card">
+                  <div class="metric-val" style="color:{color}">{ratio:.1f}×</div>
+                  <div class="metric-label">Actual / planned ({label})</div></div>""", unsafe_allow_html=True)
+            with c3:
+                st.markdown(f"""<div class="metric-card">
+                  <div class="metric-val">{entries}</div>
+                  <div class="metric-label">Tasks logged</div></div>""", unsafe_allow_html=True)
+            with c4:
+                prod_str = f"{avg_prod:.1f}/5" if not pd.isna(avg_prod) else "—"
+                st.markdown(f"""<div class="metric-card">
+                  <div class="metric-val">{prod_str}</div>
+                  <div class="metric-label">Avg productivity</div></div>""", unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Planned vs actual by week
+            st.markdown('<div class="section-title">Planned vs actual by week</div>', unsafe_allow_html=True)
+            ta["week"] = ta["date"].dt.to_period("W").apply(lambda p: p.start_time)
+            weekly = ta.groupby("week")[["planned_minutes", "actual_minutes"]].sum().reset_index()
+            weekly["planned_h"] = weekly["planned_minutes"] / 60
+            weekly["actual_h"]  = weekly["actual_minutes"]  / 60
+
+            fig = go.Figure()
+            fig.add_trace(go.Bar(x=weekly["week"], y=weekly["planned_h"], name="Planned", marker_color=BORDER))
+            fig.add_trace(go.Bar(x=weekly["week"], y=weekly["actual_h"],  name="Actual",  marker_color=ACCENT))
+            fig.update_layout(**base_layout(height=240), barmode="group")
+            fig.update_yaxes(title_text="hours")
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Estimation accuracy over time
+            st.markdown('<div class="section-title">Estimation accuracy per task</div>', unsafe_allow_html=True)
+            ta["over_under"] = ta["actual_minutes"] - ta["planned_minutes"]
+            colors_oa = [SUCCESS if v <= 0 else "#f87171" for v in ta["over_under"]]
+            fig2 = go.Figure(go.Bar(
+                x=ta["date"].dt.strftime("%b %d") + " · " + ta["task"].str[:20],
+                y=ta["over_under"],
+                marker_color=colors_oa,
+                text=[f'{int(v):+d}m' for v in ta["over_under"]],
+                textposition="outside",
+            ))
+            fig2.update_layout(**base_layout("Over(+) / Under(−) estimate in minutes", height=280))
+            fig2.update_xaxes(tickangle=-35)
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # Top tasks by actual time
+            st.markdown('<div class="section-title">Where your time actually went</div>', unsafe_allow_html=True)
+            by_task = ta.groupby("task")["actual_minutes"].sum().sort_values(ascending=True).tail(10)
+            fig3 = go.Figure(go.Bar(
+                y=by_task.index,
+                x=by_task.values / 60,
+                orientation="h",
+                marker_color=ACCENT,
+            ))
+            fig3.update_layout(**base_layout(height=max(200, len(by_task) * 30)))
+            fig3.update_xaxes(title_text="hours")
+            st.plotly_chart(fig3, use_container_width=True)
+
+            # Raw log
+            with st.expander("View raw entries"):
+                st.dataframe(
+                    ta[["date", "task", "planned_minutes", "actual_minutes", "productivity"]]
+                      .sort_values("date", ascending=False),
+                    use_container_width=True,
+                    hide_index=True,
+                )

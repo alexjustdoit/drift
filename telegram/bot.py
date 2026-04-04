@@ -1,22 +1,31 @@
 """
 Drift Telegram Bot
-Sends scheduled morning/evening check-in prompts and logs to Notion.
-All flows are fully tap-based (no typing required except free-text fields).
+Sends scheduled check-in prompts and logs to Notion.
+All numeric inputs are fully tap-based.
+
+Commands:
+  /morning  — morning check-in
+  /evening  — evening check-in
+  /now      — quick mid-day energy + mood snapshot
+  /time     — log planned vs actual time for a task
+  /cancel   — cancel current flow
 """
 
 import os
 import logging
 import threading
-import requests
-from datetime import datetime, date
+import datetime as dt
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import pytz
-from apscheduler.schedulers.background import BackgroundScheduler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ConversationHandler, filters, ContextTypes,
+)
+from notion import (
+    upsert_log, calculate_streak, get_last_left_off,
+    get_week_stats, log_time_audit,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -26,495 +35,402 @@ log = logging.getLogger(__name__)
 
 BOT_TOKEN    = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID      = int(os.environ['TELEGRAM_CHAT_ID'])
-NOTION_TOKEN = os.environ['NOTION_TOKEN']
-NOTION_DB_ID = os.environ['NOTION_DB_ID']
-MORNING_TIME = os.environ.get('MORNING_TIME', '08:00')   # HH:MM
-EVENING_TIME = os.environ.get('EVENING_TIME', '20:00')   # HH:MM
+MORNING_TIME = os.environ.get('MORNING_TIME', '08:00')
+EVENING_TIME = os.environ.get('EVENING_TIME', '20:00')
+DIGEST_DAY   = int(os.environ.get('DIGEST_DAY', '6'))    # 0=Mon … 6=Sun
+DIGEST_TIME  = os.environ.get('DIGEST_TIME', '18:00')
 TZ           = pytz.timezone(os.environ.get('TIMEZONE', 'America/New_York'))
-
-NOTION_HEADERS = {
-    'Authorization': f'Bearer {NOTION_TOKEN}',
-    'Content-Type': 'application/json',
-    'Notion-Version': '2022-06-28',
-}
 
 # ── Conversation states ───────────────────────────────────────────────────────
 
-# Morning
-(M_SLEEP_HOURS, M_SLEEP_QUALITY, M_MORNING_ENERGY,
- M_MEDS, M_EXERCISE, M_EXERCISE_MIN, M_CAFFEINE) = range(7)
+# Morning (0–6)
+M_SLEEP_HOURS, M_SLEEP_QUALITY, M_MORNING_ENERGY, M_MEDS, M_EXERCISE, M_EXERCISE_MIN, M_CAFFEINE = range(7)
 
-# Evening
-(E_AFTERNOON_ENERGY, E_MOOD, E_FOCUS, E_WIN, E_LEFT_OFF) = range(10, 15)
+# Evening (10–14)
+E_AFTERNOON_ENERGY, E_MOOD, E_FOCUS, E_WIN, E_LEFT_OFF = range(10, 15)
 
-# ── Inline keyboard helpers ───────────────────────────────────────────────────
+# Quick log (20–22)
+N_ENERGY, N_MOOD, N_WORKING = range(20, 23)
 
-def rating_keyboard(prefix):
+# Time audit (30–33)
+T_TASK, T_PLANNED, T_ACTUAL, T_PRODUCTIVITY = range(30, 34)
+
+# ── Keyboard helpers ──────────────────────────────────────────────────────────
+
+def rating_kb(prefix):
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(str(i), callback_data=f'{prefix}:{i}') for i in range(1, 6)
     ]])
 
-def yesno_keyboard(prefix):
+def yesno_kb(prefix):
     return InlineKeyboardMarkup([[
         InlineKeyboardButton('Yes', callback_data=f'{prefix}:yes'),
         InlineKeyboardButton('No',  callback_data=f'{prefix}:no'),
     ]])
 
-def sleep_keyboard():
-    row1 = [InlineKeyboardButton(f'{h}h', callback_data=f'sleep:{h}')
-            for h in [4.0, 5.0, 6.0, 6.5, 7.0]]
-    row2 = [InlineKeyboardButton(f'{h}h', callback_data=f'sleep:{h}')
-            for h in [7.5, 8.0, 8.5, 9.0, 10.0]]
-    return InlineKeyboardMarkup([row1, row2])
+def skip_kb(prefix):
+    return InlineKeyboardMarkup([[InlineKeyboardButton('Skip', callback_data=f'{prefix}:skip')]])
 
-def caffeine_keyboard():
+def sleep_kb():
+    r1 = [InlineKeyboardButton(f'{h}h', callback_data=f'sleep:{h}') for h in [4.0, 5.0, 6.0, 6.5, 7.0]]
+    r2 = [InlineKeyboardButton(f'{h}h', callback_data=f'sleep:{h}') for h in [7.5, 8.0, 8.5, 9.0, 10.0]]
+    return InlineKeyboardMarkup([r1, r2])
+
+def caffeine_kb():
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(str(i), callback_data=f'caffeine:{i}') for i in [0, 1, 2, 3, 4]
+        InlineKeyboardButton(str(i), callback_data=f'caf:{i}') for i in [0, 1, 2, 3, 4]
     ]])
 
-def exercise_min_keyboard():
+def ex_min_kb():
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(f'{m}m', callback_data=f'exmin:{m}')
-        for m in [15, 20, 30, 45, 60, 90]
+        InlineKeyboardButton(f'{m}m', callback_data=f'exmin:{m}') for m in [15, 20, 30, 45, 60, 90]
     ]])
 
-def skip_keyboard(prefix):
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton('Skip', callback_data=f'{prefix}:skip')
-    ]])
+def duration_kb(prefix):
+    r1 = [InlineKeyboardButton(f'{m}m', callback_data=f'{prefix}:{m}') for m in [15, 25, 30, 45]]
+    r2 = [InlineKeyboardButton(f'{m}m', callback_data=f'{prefix}:{m}') for m in [60, 90, 120]]
+    return InlineKeyboardMarkup([r1, r2])
 
-# ── Notion helpers ────────────────────────────────────────────────────────────
+# ── Shared utils ──────────────────────────────────────────────────────────────
 
-def today_str():
-    return datetime.now(TZ).strftime('%Y-%m-%d')
+def today() -> str:
+    return dt.datetime.now(TZ).strftime('%Y-%m-%d')
 
-def find_today_page(date_str):
-    res = requests.post(
-        f'https://api.notion.com/v1/databases/{NOTION_DB_ID}/query',
-        headers=NOTION_HEADERS,
-        json={'filter': {'property': 'Date', 'date': {'equals': date_str}}},
-    )
-    results = res.json().get('results', [])
-    return results[0] if results else None
+async def send(update: Update, text: str, **kwargs):
+    await update.effective_chat.send_message(text, parse_mode='Markdown', **kwargs)
 
-def build_properties(data: dict) -> dict:
-    props = {}
-    if 'date' in data:
-        props['Date'] = {'date': {'start': data['date']}}
-    if 'sleep_hours' in data:
-        props['Sleep Hours'] = {'number': data['sleep_hours']}
-    if 'sleep_quality' in data:
-        props['Sleep Quality'] = {'number': data['sleep_quality']}
-    if 'morning_energy' in data:
-        props['Morning Energy'] = {'number': data['morning_energy']}
-    if 'meds_taken' in data:
-        props['Meds Taken'] = {'checkbox': data['meds_taken']}
-    if 'exercise' in data:
-        props['Exercise'] = {'checkbox': data['exercise']}
-    if 'exercise_minutes' in data:
-        props['Exercise Minutes'] = {'number': data['exercise_minutes']}
-    if 'caffeine_cups' in data:
-        props['Caffeine Cups'] = {'number': data['caffeine_cups']}
-    if 'afternoon_energy' in data:
-        props['Afternoon Energy'] = {'number': data['afternoon_energy']}
-    if 'mood_eod' in data:
-        props['Mood EOD'] = {'number': data['mood_eod']}
-    if 'focus_quality' in data:
-        props['Focus Quality'] = {'number': data['focus_quality']}
-    if 'win_of_day' in data:
-        props['Win of the Day'] = {'rich_text': [{'text': {'content': data['win_of_day']}}]}
-    if 'where_left_off' in data:
-        props['Where I Left Off'] = {'rich_text': [{'text': {'content': data['where_left_off']}}]}
-    return props
+async def edit(update: Update, text: str):
+    await update.callback_query.edit_message_text(text, parse_mode='Markdown')
 
-def upsert_notion(data: dict):
-    date_str = data.get('date', today_str())
-    props = build_properties(data)
-    existing = find_today_page(date_str)
-
-    if existing:
-        requests.patch(
-            f"https://api.notion.com/v1/pages/{existing['id']}",
-            headers=NOTION_HEADERS,
-            json={'properties': props},
-        )
-    else:
-        requests.post(
-            'https://api.notion.com/v1/pages',
-            headers=NOTION_HEADERS,
-            json={
-                'parent': {'database_id': NOTION_DB_ID},
-                'properties': {
-                    'Name': {'title': [{'text': {'content': date_str}}]},
-                    **props,
-                },
-            },
-        )
-
-def calculate_streak(date_str: str) -> int:
-    try:
-        cutoff = datetime.strptime(date_str, '%Y-%m-%d')
-        from datetime import timedelta
-        cutoff -= timedelta(days=60)
-        res = requests.post(
-            f'https://api.notion.com/v1/databases/{NOTION_DB_ID}/query',
-            headers=NOTION_HEADERS,
-            json={
-                'filter': {'property': 'Date', 'date': {'on_or_after': cutoff.strftime('%Y-%m-%d')}},
-                'sorts': [{'property': 'Date', 'direction': 'descending'}],
-                'page_size': 60,
-            },
-        )
-        dates = {p['properties']['Date']['date']['start']
-                 for p in res.json().get('results', [])
-                 if p['properties'].get('Date', {}).get('date')}
-
-        from datetime import timedelta
-        streak = 0
-        check = datetime.strptime(date_str, '%Y-%m-%d')
-        while check.strftime('%Y-%m-%d') in dates:
-            streak += 1
-            check -= timedelta(days=1)
-        return streak
-    except Exception:
-        return 0
-
-def get_last_left_off() -> str | None:
-    try:
-        from datetime import timedelta
-        cutoff = (datetime.now(TZ) - timedelta(days=7)).strftime('%Y-%m-%d')
-        res = requests.post(
-            f'https://api.notion.com/v1/databases/{NOTION_DB_ID}/query',
-            headers=NOTION_HEADERS,
-            json={
-                'filter': {'property': 'Date', 'date': {'on_or_after': cutoff}},
-                'sorts': [{'property': 'Date', 'direction': 'descending'}],
-                'page_size': 7,
-            },
-        )
-        for page in res.json().get('results', []):
-            items = page['properties'].get('Where I Left Off', {}).get('rich_text', [])
-            text = items[0]['plain_text'].strip() if items else ''
-            if text:
-                return text
-    except Exception:
-        pass
-    return None
+async def finish_and_log(update: Update, context: ContextTypes.DEFAULT_TYPE, mode: str):
+    context.user_data['date'] = context.user_data.get('date', today())
+    upsert_log(context.user_data)
+    streak = calculate_streak(context.user_data['date'])
+    streak_line = f'\n🔥 *{streak} day streak*' if streak > 1 else ''
+    suffix = 'See you tonight.' if mode == 'morning' else 'Good night.'
+    await send(update, f'Logged. ✓{streak_line}\n\n{suffix}')
+    return ConversationHandler.END
 
 # ── Morning flow ──────────────────────────────────────────────────────────────
 
 async def morning_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    context.user_data['date'] = today_str()
-
-    left_off = get_last_left_off()
+    left_off = get_last_left_off(TZ)
     if left_off:
-        await update.effective_chat.send_message(
-            f"☀️ *Good morning!*\n\n_Yesterday you left off:_\n{left_off}",
-            parse_mode='Markdown',
-        )
+        await send(update, f'☀️ *Good morning!*\n\n_Yesterday you left off:_\n{left_off}')
     else:
-        await update.effective_chat.send_message("☀️ *Good morning!* Time for your morning check-in.", parse_mode='Markdown')
-
-    await update.effective_chat.send_message(
-        "How many hours did you sleep?",
-        reply_markup=sleep_keyboard(),
-    )
+        await send(update, '☀️ *Good morning!* Time for your morning check-in.')
+    await send(update, 'How many hours did you sleep?', reply_markup=sleep_kb())
     return M_SLEEP_HOURS
 
 async def m_sleep_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = float(q.data.split(':')[1])
-    context.user_data['sleep_hours'] = val
-    await q.edit_message_text(f"Sleep: *{val}h* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Sleep quality?",
-        reply_markup=rating_keyboard('sq'),
-    )
+    q = update.callback_query; await q.answer()
+    v = float(q.data.split(':')[1]); context.user_data['sleep_hours'] = v
+    await edit(update, f'Sleep: *{v}h* ✓')
+    await send(update, 'Sleep quality?', reply_markup=rating_kb('sq'))
     return M_SLEEP_QUALITY
 
 async def m_sleep_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['sleep_quality'] = val
-    await q.edit_message_text(f"Sleep quality: *{val}/5* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Morning energy right now?",
-        reply_markup=rating_keyboard('me'),
-    )
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['sleep_quality'] = v
+    await edit(update, f'Sleep quality: *{v}/5* ✓')
+    await send(update, 'Morning energy right now?', reply_markup=rating_kb('me'))
     return M_MORNING_ENERGY
 
 async def m_morning_energy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['morning_energy'] = val
-    await q.edit_message_text(f"Morning energy: *{val}/5* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Meds taken?",
-        reply_markup=yesno_keyboard('meds'),
-    )
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['morning_energy'] = v
+    await edit(update, f'Morning energy: *{v}/5* ✓')
+    await send(update, 'Meds taken?', reply_markup=yesno_kb('meds'))
     return M_MEDS
 
 async def m_meds(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = q.data.split(':')[1] == 'yes'
-    context.user_data['meds_taken'] = val
-    await q.edit_message_text(f"Meds: *{'Yes' if val else 'No'}* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Exercise this morning?",
-        reply_markup=yesno_keyboard('ex'),
-    )
+    q = update.callback_query; await q.answer()
+    v = q.data.split(':')[1] == 'yes'; context.user_data['meds_taken'] = v
+    await edit(update, f'Meds: *{"Yes" if v else "No"}* ✓')
+    await send(update, 'Exercise this morning?', reply_markup=yesno_kb('ex'))
     return M_EXERCISE
 
 async def m_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = q.data.split(':')[1] == 'yes'
-    context.user_data['exercise'] = val
-    await q.edit_message_text(f"Exercise: *{'Yes' if val else 'No'}* ✓", parse_mode='Markdown')
-    if val:
-        await update.effective_chat.send_message(
-            "How many minutes?",
-            reply_markup=exercise_min_keyboard(),
-        )
+    q = update.callback_query; await q.answer()
+    v = q.data.split(':')[1] == 'yes'; context.user_data['exercise'] = v
+    await edit(update, f'Exercise: *{"Yes" if v else "No"}* ✓')
+    if v:
+        await send(update, 'How many minutes?', reply_markup=ex_min_kb())
         return M_EXERCISE_MIN
-    else:
-        context.user_data['exercise_minutes'] = 0
-        await update.effective_chat.send_message(
-            "Caffeine so far?",
-            reply_markup=caffeine_keyboard(),
-        )
-        return M_CAFFEINE
+    context.user_data['exercise_minutes'] = 0
+    await send(update, 'Caffeine so far?', reply_markup=caffeine_kb())
+    return M_CAFFEINE
 
 async def m_exercise_min(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['exercise_minutes'] = val
-    await q.edit_message_text(f"Exercise: *{val} min* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Caffeine so far?",
-        reply_markup=caffeine_keyboard(),
-    )
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['exercise_minutes'] = v
+    await edit(update, f'Exercise: *{v} min* ✓')
+    await send(update, 'Caffeine so far?', reply_markup=caffeine_kb())
     return M_CAFFEINE
 
 async def m_caffeine(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['caffeine_cups'] = val
-    await q.edit_message_text(f"Caffeine: *{val} cup{'s' if val != 1 else ''}* ✓", parse_mode='Markdown')
-
-    upsert_notion(context.user_data)
-    streak = calculate_streak(context.user_data['date'])
-    streak_line = f"\n🔥 *{streak} day streak*" if streak > 1 else ""
-    await update.effective_chat.send_message(
-        f"Logged. ✓{streak_line}\n\nSee you tonight.",
-        parse_mode='Markdown',
-    )
-    return ConversationHandler.END
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['caffeine_cups'] = v
+    await edit(update, f'Caffeine: *{v} cup{"s" if v != 1 else ""}* ✓')
+    return await finish_and_log(update, context, 'morning')
 
 # ── Evening flow ──────────────────────────────────────────────────────────────
 
 async def evening_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    context.user_data['date'] = today_str()
-    await update.effective_chat.send_message("🌙 *Evening check-in.* How was your afternoon energy?", parse_mode='Markdown',
-        reply_markup=rating_keyboard('ae'))
+    await send(update, '🌙 *Evening check-in.* Afternoon energy?', reply_markup=rating_kb('ae'))
     return E_AFTERNOON_ENERGY
 
 async def e_afternoon_energy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['afternoon_energy'] = val
-    await q.edit_message_text(f"Afternoon energy: *{val}/5* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message("Mood at end of day?", reply_markup=rating_keyboard('mood'))
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['afternoon_energy'] = v
+    await edit(update, f'Afternoon energy: *{v}/5* ✓')
+    await send(update, 'Mood at end of day?', reply_markup=rating_kb('mood'))
     return E_MOOD
 
 async def e_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['mood_eod'] = val
-    await q.edit_message_text(f"Mood: *{val}/5* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message("Focus quality today?", reply_markup=rating_keyboard('fq'))
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['mood_eod'] = v
+    await edit(update, f'Mood: *{v}/5* ✓')
+    await send(update, 'Focus quality today?', reply_markup=rating_kb('fq'))
     return E_FOCUS
 
 async def e_focus(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    val = int(q.data.split(':')[1])
-    context.user_data['focus_quality'] = val
-    await q.edit_message_text(f"Focus: *{val}/5* ✓", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Win of the day? _(or tap Skip)_",
-        parse_mode='Markdown',
-        reply_markup=skip_keyboard('win'),
-    )
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['focus_quality'] = v
+    await edit(update, f'Focus: *{v}/5* ✓')
+    await send(update, 'Win of the day? _(or skip)_', reply_markup=skip_kb('win'))
     return E_WIN
 
 async def e_win_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['win_of_day'] = update.message.text.strip()
-    await update.effective_chat.send_message(
-        "Where are you leaving off? _(or tap Skip)_",
-        parse_mode='Markdown',
-        reply_markup=skip_keyboard('loff'),
-    )
+    await send(update, 'Where are you leaving off? _(or skip)_', reply_markup=skip_kb('loff'))
     return E_LEFT_OFF
 
 async def e_win_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    await q.edit_message_text("Win: _skipped_", parse_mode='Markdown')
-    await update.effective_chat.send_message(
-        "Where are you leaving off? _(or tap Skip)_",
-        parse_mode='Markdown',
-        reply_markup=skip_keyboard('loff'),
-    )
+    q = update.callback_query; await q.answer()
+    await edit(update, 'Win: _skipped_')
+    await send(update, 'Where are you leaving off? _(or skip)_', reply_markup=skip_kb('loff'))
     return E_LEFT_OFF
 
 async def e_left_off_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['where_left_off'] = update.message.text.strip()
-    return await _finish_evening(update, context)
+    return await finish_and_log(update, context, 'evening')
 
 async def e_left_off_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    await q.edit_message_text("Left off: _skipped_", parse_mode='Markdown')
-    return await _finish_evening(update, context)
+    q = update.callback_query; await q.answer()
+    await edit(update, 'Left off: _skipped_')
+    return await finish_and_log(update, context, 'evening')
 
-async def _finish_evening(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    upsert_notion(context.user_data)
-    streak = calculate_streak(context.user_data['date'])
-    streak_line = f"\n🔥 *{streak} day streak*" if streak > 1 else ""
-    await update.effective_chat.send_message(
-        f"Logged. ✓{streak_line}\n\nGood night.",
-        parse_mode='Markdown',
-    )
+# ── Quick log (/now) ──────────────────────────────────────────────────────────
+
+async def now_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await send(update, '⚡ *Quick check-in.* Energy right now?', reply_markup=rating_kb('ne'))
+    return N_ENERGY
+
+async def n_energy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['midday_energy'] = v
+    await edit(update, f'Energy: *{v}/5* ✓')
+    await send(update, 'Mood?', reply_markup=rating_kb('nm'))
+    return N_MOOD
+
+async def n_mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['midday_mood'] = v
+    await edit(update, f'Mood: *{v}/5* ✓')
+    await send(update, 'What are you working on? _(or skip)_', reply_markup=skip_kb('nw'))
+    return N_WORKING
+
+async def n_working_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['working_on'] = update.message.text.strip()
+    context.user_data['date'] = today()
+    upsert_log(context.user_data)
+    await send(update, 'Logged. ✓')
+    return ConversationHandler.END
+
+async def n_working_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    await edit(update, 'Working on: _skipped_')
+    context.user_data['date'] = today()
+    upsert_log(context.user_data)
+    await send(update, 'Logged. ✓')
+    return ConversationHandler.END
+
+# ── Time audit (/time) ────────────────────────────────────────────────────────
+
+async def time_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not os.environ.get('NOTION_TIME_AUDIT_DB_ID'):
+        await send(update, '⚠️ Time audit not set up yet. Add `NOTION_TIME_AUDIT_DB_ID` to your Render env vars.')
+        return ConversationHandler.END
+    context.user_data.clear()
+    await send(update, '⏱ *Time audit.* What were you working on?')
+    return T_TASK
+
+async def t_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['task'] = update.message.text.strip()
+    await send(update, 'How long did you *plan* to spend?', reply_markup=duration_kb('tp'))
+    return T_PLANNED
+
+async def t_planned(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['planned_minutes'] = v
+    await edit(update, f'Planned: *{v} min* ✓')
+    await send(update, 'How long did you *actually* spend?', reply_markup=duration_kb('ta'))
+    return T_ACTUAL
+
+async def t_actual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    v = int(q.data.split(':')[1]); context.user_data['actual_minutes'] = v
+    await edit(update, f'Actual: *{v} min* ✓')
+    await send(update, 'How productive was it? _(or skip)_', reply_markup=InlineKeyboardMarkup([[
+        InlineKeyboardButton(str(i), callback_data=f'tp2:{i}') for i in range(1, 6)
+    ], [InlineKeyboardButton('Skip', callback_data='tp2:skip')]]))
+    return T_PRODUCTIVITY
+
+async def t_productivity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    val = q.data.split(':')[1]
+    if val != 'skip':
+        context.user_data['productivity'] = int(val)
+    context.user_data['date'] = today()
+    log_time_audit(context.user_data)
+    planned = context.user_data['planned_minutes']
+    actual  = context.user_data['actual_minutes']
+    diff    = actual - planned
+    diff_str = f'+{diff}' if diff > 0 else str(diff)
+    await edit(update, f'Logged. ✓ _{planned}min planned → {actual}min actual ({diff_str}min)_')
     return ConversationHandler.END
 
 # ── Cancel ────────────────────────────────────────────────────────────────────
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.effective_chat.send_message("Check-in cancelled. Use /morning or /evening to start again.")
+    await send(update, 'Cancelled. Use /morning, /evening, /now, or /time to start again.')
     return ConversationHandler.END
 
-# ── Scheduled triggers ────────────────────────────────────────────────────────
+# ── Weekly digest ─────────────────────────────────────────────────────────────
 
-def schedule_checkins(app: Application):
-    scheduler = BackgroundScheduler(timezone=TZ)
+async def send_weekly_digest(context: ContextTypes.DEFAULT_TYPE):
+    stats = get_week_stats(TZ)
+    if not stats:
+        return
 
-    m_hour, m_min = map(int, MORNING_TIME.split(':'))
-    e_hour, e_min = map(int, EVENING_TIME.split(':'))
+    lines = ['📊 *Week in review*\n']
+    lines.append(f'📅 Logged {stats["days_logged"]}/7 days')
+    if stats['avg_sleep']:
+        lines.append(f'😴 Avg sleep: {stats["avg_sleep"]}h')
+    if stats['avg_focus']:
+        lines.append(f'🎯 Avg focus: {stats["avg_focus"]}/5')
+    if stats['avg_mood']:
+        lines.append(f'😊 Avg mood: {stats["avg_mood"]}/5')
+    lines.append(f'💊 Meds: {stats["days_meds"]}/7 days')
+    lines.append(f'🏃 Exercise: {stats["days_ex"]}/7 days')
 
-    async def send_morning():
-        await app.bot.send_message(
-            chat_id=CHAT_ID,
-            text="☀️ Morning check-in time! Tap /morning to start.",
-        )
+    if stats['best_day']:
+        day, focus, mood = stats['best_day']
+        lines.append(f'\n✨ Best day: {day} (focus {focus}, mood {mood})')
 
-    async def send_evening():
-        await app.bot.send_message(
-            chat_id=CHAT_ID,
-            text="🌙 Evening check-in time! Tap /evening to start.",
-        )
+    if stats['random_win']:
+        lines.append(f'\n🏆 Win: _{stats["random_win"]}_')
 
-    import asyncio
+    await context.bot.send_message(
+        chat_id=CHAT_ID,
+        text='\n'.join(lines),
+        parse_mode='Markdown',
+    )
 
-    def run_morning():
-        asyncio.run_coroutine_threadsafe(send_morning(), app.bot._application.loop if hasattr(app.bot, '_application') else asyncio.get_event_loop())
+# ── Scheduling ────────────────────────────────────────────────────────────────
 
-    # Use PTB's job queue for thread-safe scheduling instead
-    scheduler.shutdown()
+def schedule_jobs(app: Application):
+    m_h, m_m = map(int, MORNING_TIME.split(':'))
+    e_h, e_m = map(int, EVENING_TIME.split(':'))
+    d_h, d_m = map(int, DIGEST_TIME.split(':'))
 
-def schedule_with_job_queue(app: Application):
-    m_hour, m_min = map(int, MORNING_TIME.split(':'))
-    e_hour, e_min = map(int, EVENING_TIME.split(':'))
+    days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
 
-    async def morning_job(context: ContextTypes.DEFAULT_TYPE):
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text="☀️ Morning check-in time! Tap /morning to start.",
-        )
+    async def morning_nudge(ctx): await ctx.bot.send_message(CHAT_ID, '☀️ Morning check-in time! /morning')
+    async def evening_nudge(ctx): await ctx.bot.send_message(CHAT_ID, '🌙 Evening check-in time! /evening')
 
-    async def evening_job(context: ContextTypes.DEFAULT_TYPE):
-        await context.bot.send_message(
-            chat_id=CHAT_ID,
-            text="🌙 Evening check-in time! Tap /evening to start.",
-        )
+    app.job_queue.run_daily(morning_nudge, dt.time(m_h, m_m, tzinfo=TZ))
+    app.job_queue.run_daily(evening_nudge, dt.time(e_h, e_m, tzinfo=TZ))
+    app.job_queue.run_daily(
+        send_weekly_digest,
+        dt.time(d_h, d_m, tzinfo=TZ),
+        days=(DIGEST_DAY,),
+    )
+    log.info(f'Scheduled: morning {MORNING_TIME}, evening {EVENING_TIME}, digest {days[DIGEST_DAY]} {DIGEST_TIME} ({TZ})')
 
-    import datetime as dt
-    app.job_queue.run_daily(morning_job, time=dt.time(m_hour, m_min, tzinfo=TZ))
-    app.job_queue.run_daily(evening_job, time=dt.time(e_hour, e_min, tzinfo=TZ))
-    log.info(f"Scheduled morning at {MORNING_TIME}, evening at {EVENING_TIME} ({TZ})")
+# ── Health server ─────────────────────────────────────────────────────────────
 
-# ── Health check server (required by Render free tier) ────────────────────────
-
-class HealthHandler(BaseHTTPRequestHandler):
+class _Health(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'ok')
-    def log_message(self, *args):
-        pass  # suppress access logs
+        self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+    def log_message(self, *a): pass
 
 def start_health_server():
-    port = int(os.environ.get('PORT', 8080))
-    HTTPServer(('0.0.0.0', port), HealthHandler).serve_forever()
+    HTTPServer(('0.0.0.0', int(os.environ.get('PORT', 8080))), _Health).serve_forever()
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     threading.Thread(target=start_health_server, daemon=True).start()
-    log.info("Health server started")
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    morning_handler = ConversationHandler(
+    app.add_handler(ConversationHandler(
         entry_points=[CommandHandler('morning', morning_start)],
         states={
-            M_SLEEP_HOURS:    [CallbackQueryHandler(m_sleep_hours,   pattern=r'^sleep:')],
-            M_SLEEP_QUALITY:  [CallbackQueryHandler(m_sleep_quality, pattern=r'^sq:')],
-            M_MORNING_ENERGY: [CallbackQueryHandler(m_morning_energy,pattern=r'^me:')],
-            M_MEDS:           [CallbackQueryHandler(m_meds,          pattern=r'^meds:')],
-            M_EXERCISE:       [CallbackQueryHandler(m_exercise,      pattern=r'^ex:')],
-            M_EXERCISE_MIN:   [CallbackQueryHandler(m_exercise_min,  pattern=r'^exmin:')],
-            M_CAFFEINE:       [CallbackQueryHandler(m_caffeine,      pattern=r'^caffeine:')],
+            M_SLEEP_HOURS:    [CallbackQueryHandler(m_sleep_hours,    pattern=r'^sleep:')],
+            M_SLEEP_QUALITY:  [CallbackQueryHandler(m_sleep_quality,  pattern=r'^sq:')],
+            M_MORNING_ENERGY: [CallbackQueryHandler(m_morning_energy, pattern=r'^me:')],
+            M_MEDS:           [CallbackQueryHandler(m_meds,           pattern=r'^meds:')],
+            M_EXERCISE:       [CallbackQueryHandler(m_exercise,       pattern=r'^ex:')],
+            M_EXERCISE_MIN:   [CallbackQueryHandler(m_exercise_min,   pattern=r'^exmin:')],
+            M_CAFFEINE:       [CallbackQueryHandler(m_caffeine,       pattern=r'^caf:')],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
-        per_chat=True,
-    )
+    ))
 
-    evening_handler = ConversationHandler(
+    app.add_handler(ConversationHandler(
         entry_points=[CommandHandler('evening', evening_start)],
         states={
             E_AFTERNOON_ENERGY: [CallbackQueryHandler(e_afternoon_energy, pattern=r'^ae:')],
             E_MOOD:             [CallbackQueryHandler(e_mood,             pattern=r'^mood:')],
             E_FOCUS:            [CallbackQueryHandler(e_focus,            pattern=r'^fq:')],
-            E_WIN: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, e_win_text),
-                CallbackQueryHandler(e_win_skip, pattern=r'^win:skip'),
-            ],
-            E_LEFT_OFF: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, e_left_off_text),
-                CallbackQueryHandler(e_left_off_skip, pattern=r'^loff:skip'),
-            ],
+            E_WIN:  [MessageHandler(filters.TEXT & ~filters.COMMAND, e_win_text),
+                     CallbackQueryHandler(e_win_skip,       pattern=r'^win:skip')],
+            E_LEFT_OFF: [MessageHandler(filters.TEXT & ~filters.COMMAND, e_left_off_text),
+                         CallbackQueryHandler(e_left_off_skip, pattern=r'^loff:skip')],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
-        per_chat=True,
-    )
+    ))
 
-    app.add_handler(morning_handler)
-    app.add_handler(evening_handler)
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler('now', now_start)],
+        states={
+            N_ENERGY:  [CallbackQueryHandler(n_energy,       pattern=r'^ne:')],
+            N_MOOD:    [CallbackQueryHandler(n_mood,         pattern=r'^nm:')],
+            N_WORKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, n_working_text),
+                        CallbackQueryHandler(n_working_skip, pattern=r'^nw:skip')],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    ))
 
-    schedule_with_job_queue(app)
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler('time', time_start)],
+        states={
+            T_TASK:         [MessageHandler(filters.TEXT & ~filters.COMMAND, t_task)],
+            T_PLANNED:      [CallbackQueryHandler(t_planned,      pattern=r'^tp:')],
+            T_ACTUAL:       [CallbackQueryHandler(t_actual,       pattern=r'^ta:')],
+            T_PRODUCTIVITY: [CallbackQueryHandler(t_productivity, pattern=r'^tp2:')],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    ))
 
-    log.info("Bot starting with polling...")
+    schedule_jobs(app)
+    log.info('Drift bot starting...')
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
