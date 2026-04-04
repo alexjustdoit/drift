@@ -1,0 +1,26 @@
+# Render deployment config for the Drift Telegram bot
+# Import this repo at render.com → New Web Service
+
+services:
+  - type: web
+    name: drift-telegram-bot
+    runtime: python
+    rootDir: telegram
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false          # set manually in Render dashboard
+      - key: TELEGRAM_CHAT_ID
+        sync: false          # your Telegram user ID — get it from @userinfobot
+      - key: NOTION_TOKEN
+        sync: false
+      - key: NOTION_DB_ID
+        sync: false
+      - key: MORNING_TIME
+        value: "08:00"       # HH:MM — change to your preferred time
+      - key: EVENING_TIME
+        value: "20:00"       # HH:MM — change to your preferred time
+      - key: TIMEZONE
+        value: "America/New_York"  # your timezone

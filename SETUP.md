@@ -90,7 +90,35 @@ The app now lives on your home screen and opens full-screen.
 
 ---
 
-## 6. Deploy Analysis App to Streamlit (after building it)
+## 6. Deploy Telegram Bot to Render
+
+1. **Create a Telegram bot:**
+   - Message `@BotFather` on Telegram
+   - Send `/newbot`, follow prompts, copy the bot token
+
+2. **Get your Telegram user ID:**
+   - Message `@userinfobot` on Telegram
+   - It replies with your numeric user ID
+
+3. **Deploy to Render:**
+   - Go to https://render.com → **New Web Service**
+   - Connect your GitHub account → select `alexjustdoit/drift`
+   - Render will auto-detect `render.yaml` — confirm the `drift-telegram-bot` service
+   - Under **Environment**, add the secret vars:
+     - `TELEGRAM_BOT_TOKEN` = your bot token
+     - `TELEGRAM_CHAT_ID` = your numeric user ID
+     - `NOTION_TOKEN` = your Notion token
+     - `NOTION_DB_ID` = your database ID
+   - Set `MORNING_TIME`, `EVENING_TIME`, `TIMEZONE` to your preferences
+   - Click **Create Web Service**
+
+4. **Test:** Message `/morning` or `/evening` to your bot to verify flows work
+
+5. After Streamlit app is deployed, update `keepalive.yml` with the SCC URL
+
+---
+
+## 7. Deploy Analysis App to Streamlit (after building it)
 
 1. Go to https://share.streamlit.io → **New app**
 2. Repo: `alexjustdoit/drift`
@@ -109,6 +137,7 @@ The app now lives on your home screen and opens full-screen.
 
 ## Checklist
 
+
 - [ ] Notion integration created, token copied
 - [ ] Notion database created with exact schema
 - [ ] Database shared with Drift integration
@@ -117,5 +146,8 @@ The app now lives on your home screen and opens full-screen.
 - [ ] GitHub Pages enabled
 - [ ] PWA installed on iPhone
 - [ ] Morning and evening flows tested end-to-end
+- [ ] Telegram bot created via @BotFather, token copied
+- [ ] Bot deployed to Render with all env vars
+- [ ] /morning and /evening commands tested in Telegram
 - [ ] Streamlit analysis app deployed (v0.2)
 - [ ] Keepalive workflow URL updated

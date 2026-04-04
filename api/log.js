@@ -77,6 +77,41 @@ function buildProperties(body) {
   return props;
 }
 
+async function calculateStreak(loggedDate) {
+  try {
+    const cutoff = new Date(loggedDate);
+    cutoff.setDate(cutoff.getDate() - 60);
+
+    const res = await fetch(`https://api.notion.com/v1/databases/${NOTION_DB_ID}/query`, {
+      method: 'POST',
+      headers: notionHeaders,
+      body: JSON.stringify({
+        filter: {
+          property: 'Date',
+          date: { on_or_after: cutoff.toISOString().split('T')[0] },
+        },
+        sorts: [{ property: 'Date', direction: 'descending' }],
+        page_size: 60,
+      }),
+    });
+    const data = await res.json();
+
+    const dateSet = new Set(
+      (data.results ?? []).map(p => p.properties?.Date?.date?.start).filter(Boolean)
+    );
+
+    let streak = 0;
+    const check = new Date(loggedDate + 'T12:00:00Z');
+    while (dateSet.has(check.toISOString().split('T')[0])) {
+      streak++;
+      check.setDate(check.getDate() - 1);
+    }
+    return streak;
+  } catch {
+    return 0;
+  }
+}
+
 export default async function handler(req, res) {
   // CORS — allow GitHub Pages origin
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -115,7 +150,8 @@ export default async function handler(req, res) {
       });
     }
 
-    res.status(200).json({ ok: true });
+    const streak = await calculateStreak(body.date);
+    res.status(200).json({ ok: true, streak });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });

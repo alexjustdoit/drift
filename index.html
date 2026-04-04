@@ -318,6 +318,63 @@
       transition: all 0.15s;
     }
     .success-again:active { opacity: 0.7; }
+    .success-streak {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Yesterday card ── */
+    .yesterday-card {
+      display: none;
+      margin: 0 24px 20px;
+      padding: 14px 18px;
+      background: var(--surface);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 12px 12px 0;
+      animation: fadeSlide 0.3s ease;
+    }
+    .yesterday-card.visible { display: block; }
+    .yesterday-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .yesterday-text { font-size: 15px; color: var(--text); line-height: 1.4; }
+
+    /* ── Catch-up date picker ── */
+    .date-picker-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin: -12px 24px 20px;
+    }
+    .date-toggle {
+      font-size: 12px;
+      color: var(--muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      padding: 0;
+    }
+    .date-input {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 5px 10px;
+      outline: none;
+    }
+    .date-input.visible { display: block; }
+    .date-input::-webkit-calendar-picker-indicator { filter: invert(0.6); }
   </style>
 </head>
 <body>
@@ -330,6 +387,18 @@
   <div class="mode-toggle" id="modeToggle">
     <button class="mode-btn active" onclick="setMode('morning')">Morning</button>
     <button class="mode-btn" onclick="setMode('evening')">Evening</button>
+  </div>
+
+  <!-- Catch-up date picker -->
+  <div class="date-picker-row">
+    <button class="date-toggle" onclick="toggleDatePicker()">different date?</button>
+    <input type="date" class="date-input" id="dateInput" onchange="setLogDate(this.value)" />
+  </div>
+
+  <!-- Yesterday card (morning only) -->
+  <div class="yesterday-card" id="yesterdayCard">
+    <div class="yesterday-label">Yesterday you left off</div>
+    <div class="yesterday-text" id="yesterdayText"></div>
   </div>
 
   <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
@@ -458,6 +527,7 @@
   <div class="success-screen" id="successScreen">
     <div class="success-icon">✓</div>
     <div class="success-title" id="successTitle">Logged.</div>
+    <div class="success-streak" id="successStreak" style="display:none"></div>
     <div class="success-sub" id="successSub"></div>
     <button class="success-again" onclick="resetForm()">Log again</button>
   </div>
@@ -477,12 +547,14 @@
   <script>
     // ── Config ──
     // Replace with your Vercel deployment URL after deploying
-    const API_URL = 'https://YOUR-PROJECT.vercel.app/api/log';
+    const API_BASE = 'https://YOUR-PROJECT.vercel.app/api';
+    const API_URL  = API_BASE + '/log';
 
     // ── State ──
     const state = {
       mode: 'morning',
       step: 0,
+      logDate: null,  // null = use today; set by date picker for catch-up logging
       sleepHours: 7.0,
       sleepQuality: null,
       morningEnergy: null,
@@ -508,6 +580,9 @@
     document.getElementById('dateLabel').textContent =
       new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
+    // Cap date picker at today
+    document.getElementById('dateInput').max = new Date().toISOString().split('T')[0];
+
     buildRatingGroup('rg-sleepQuality',   'sleepQuality');
     buildRatingGroup('rg-morningEnergy',  'morningEnergy');
     buildRatingGroup('rg-afternoonEnergy','afternoonEnergy');
@@ -516,6 +591,7 @@
 
     updateProgress();
     updateNextBtn();
+    fetchYesterday();
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -566,6 +642,40 @@
       vibrate(8);
     }
 
+    // ── Yesterday card ──
+    async function fetchYesterday() {
+      try {
+        const res = await fetch(API_BASE + '/yesterday');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.text) {
+          document.getElementById('yesterdayText').textContent = data.text;
+          document.getElementById('yesterdayCard').classList.add('visible');
+        }
+      } catch {}  // non-critical, fail silently
+    }
+
+    function syncYesterdayCard(mode) {
+      const hasText = !!document.getElementById('yesterdayText').textContent;
+      document.getElementById('yesterdayCard').classList.toggle('visible', mode === 'morning' && hasText);
+    }
+
+    // ── Catch-up date picker ──
+    function toggleDatePicker() {
+      const input = document.getElementById('dateInput');
+      input.classList.toggle('visible');
+      if (input.classList.contains('visible') && !input.value) {
+        input.value = new Date().toISOString().split('T')[0];
+      }
+    }
+
+    function setLogDate(val) {
+      state.logDate = val;
+      const d = new Date(val + 'T12:00:00');
+      document.getElementById('dateLabel').textContent =
+        d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
     // ── Mode ──
     function setMode(m) {
       state.mode = m;
@@ -579,6 +689,7 @@
       document.getElementById('navRow').style.display = 'flex';
       document.getElementById('modeToggle').style.display = 'flex';
       document.getElementById('errorBanner').classList.remove('visible');
+      syncYesterdayCard(m);
       resetSteps();
       updateProgress();
       updateNextBtn();
@@ -635,8 +746,7 @@
       btn.disabled = true;
       document.getElementById('errorBanner').classList.remove('visible');
 
-      const today = new Date().toISOString().split('T')[0];
-      const payload = { date: today };
+      const payload = { date: state.logDate || new Date().toISOString().split('T')[0] };
 
       if (state.mode === 'morning') {
         payload.sleepHours      = state.sleepHours;
@@ -661,7 +771,8 @@
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(`Server error ${res.status}`);
-        showSuccess();
+        const data = await res.json();
+        showSuccess(data.streak ?? 0);
       } catch (err) {
         btn.classList.remove('loading');
         btn.disabled = false;
@@ -671,12 +782,22 @@
       }
     }
 
-    function showSuccess() {
+    function showSuccess(streak) {
       document.getElementById('morningFlow').style.display = 'none';
       document.getElementById('eveningFlow').style.display = 'none';
       document.getElementById('navRow').style.display = 'none';
       document.getElementById('modeToggle').style.display = 'none';
+      document.getElementById('yesterdayCard').classList.remove('visible');
       document.getElementById('progressFill').style.width = '100%';
+
+      const streakEl = document.getElementById('successStreak');
+      if (streak > 1) {
+        streakEl.textContent = `${streak} day streak`;
+        streakEl.style.display = 'block';
+      } else {
+        streakEl.style.display = 'none';
+      }
+
       document.getElementById('successSub').innerHTML = state.mode === 'morning'
         ? 'Morning check-in saved.<br>See you tonight.'
         : 'Evening check-in saved.<br>Good night.';
@@ -685,13 +806,18 @@
     }
 
     function resetForm() {
-      // Reset ratings
       ['sleepQuality','morningEnergy','afternoonEnergy','moodEOD','focusQuality']
         .forEach(k => { state[k] = null; });
       document.querySelectorAll('.rating-btn').forEach(b => b.classList.remove('selected'));
-      // Reset textareas
       document.getElementById('winText').value = '';
       document.getElementById('leftOffText').value = '';
+      // Reset date picker
+      state.logDate = null;
+      const dateInput = document.getElementById('dateInput');
+      dateInput.value = '';
+      dateInput.classList.remove('visible');
+      document.getElementById('dateLabel').textContent =
+        new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       setMode(state.mode);
     }
 
