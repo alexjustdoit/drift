@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Drift" />
+  <meta name="theme-color" content="#0d0f14" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <title>Drift</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #161a24;
+      --border:    #252a38;
+      --accent:    #7c6af7;
+      --accent-dim:#3d3580;
+      --text:      #e8eaf0;
+      --muted:     #6b7280;
+      --success:   #34d399;
+      --error:     #f87171;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 0 env(safe-area-inset-bottom, 24px);
+      overflow-x: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: calc(env(safe-area-inset-top, 0px) + 20px) 24px 16px;
+    }
+    .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: var(--accent); }
+    .date { font-size: 13px; color: var(--muted); }
+
+    /* ── Mode toggle ── */
+    .mode-toggle {
+      display: flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 4px;
+      margin: 0 24px 24px;
+      width: calc(100% - 48px);
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .mode-btn.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 12px rgba(124,106,247,0.4);
+    }
+
+    /* ── Progress bar ── */
+    .progress-bar {
+      width: calc(100% - 48px);
+      margin: 0 24px 24px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.35s ease;
+    }
+
+    /* ── Step container ── */
+    .step-container { width: 100%; padding: 0 24px; }
+
+    .step {
+      display: none;
+      flex-direction: column;
+      gap: 24px;
+      animation: fadeSlide 0.25s ease;
+    }
+    .step.active { display: flex; }
+
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateX(16px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    /* ── Question ── */
+    .question { font-size: 20px; font-weight: 600; line-height: 1.3; }
+    .question-sub { font-size: 14px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Rating pills ── */
+    .rating-group { display: flex; gap: 10px; }
+    .rating-btn {
+      flex: 1;
+      aspect-ratio: 1;
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .rating-btn:active { transform: scale(0.93); }
+    .rating-btn.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 2px 14px rgba(124,106,247,0.45);
+    }
+
+    /* ── Number input ── */
+    .num-input-row { display: flex; align-items: center; gap: 16px; }
+    .num-btn {
+      width: 52px; height: 52px;
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 22px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .num-btn:active { transform: scale(0.92); background: var(--accent-dim); }
+    .num-display { flex: 1; text-align: center; font-size: 36px; font-weight: 700; }
+    .num-unit { font-size: 14px; color: var(--muted); margin-top: 2px; text-align: center; }
+
+    /* ── Toggle ── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px 20px;
+      cursor: pointer;
+    }
+    .toggle-label { font-size: 17px; font-weight: 500; }
+    .toggle-switch {
+      width: 52px; height: 30px;
+      background: var(--border);
+      border-radius: 15px;
+      position: relative;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+    .toggle-switch.on { background: var(--accent); }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 24px; height: 24px;
+      background: #fff;
+      border-radius: 50%;
+      top: 3px; left: 3px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .toggle-switch.on::after { transform: translateX(22px); }
+
+    /* ── Exercise minutes (conditional) ── */
+    .exercise-minutes {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      animation: fadeSlide 0.2s ease;
+    }
+    .exercise-minutes.visible { display: flex; }
+    .exercise-minutes .question-sub { font-size: 15px; color: var(--muted); }
+
+    /* ── Textarea ── */
+    .drift-textarea {
+      width: 100%;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 16px;
+      color: var(--text);
+      font-size: 16px;
+      font-family: inherit;
+      padding: 16px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s;
+      min-height: 100px;
+    }
+    .drift-textarea:focus { border-color: var(--accent); }
+    .drift-textarea::placeholder { color: var(--muted); }
+
+    /* ── Nav ── */
+    .nav-row {
+      display: flex;
+      gap: 12px;
+      padding: 20px 24px 0;
+      width: 100%;
+    }
+    .btn-back {
+      width: 52px; height: 52px;
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 20px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-back:active { transform: scale(0.92); }
+    .btn-next {
+      flex: 1;
+      height: 52px;
+      border: none;
+      border-radius: 14px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 16px rgba(124,106,247,0.35);
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-next:active { transform: scale(0.97); opacity: 0.9; }
+    .btn-next:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .btn-next.loading .spinner { display: block; }
+    .btn-next.loading .btn-label { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error banner ── */
+    .error-banner {
+      display: none;
+      margin: 16px 24px 0;
+      padding: 12px 16px;
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.3);
+      border-radius: 12px;
+      font-size: 14px;
+      color: var(--error);
+      width: calc(100% - 48px);
+    }
+    .error-banner.visible { display: block; }
+
+    /* ── Success ── */
+    .success-screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 60px 24px;
+      text-align: center;
+      animation: fadeSlide 0.3s ease;
+      flex: 1;
+    }
+    .success-screen.active { display: flex; }
+    .success-icon {
+      width: 72px; height: 72px;
+      background: rgba(52,211,153,0.15);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+    }
+    .success-title { font-size: 22px; font-weight: 700; }
+    .success-sub { font-size: 15px; color: var(--muted); line-height: 1.6; }
+    .success-again {
+      margin-top: 8px;
+      padding: 12px 24px;
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .success-again:active { opacity: 0.7; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">drift<span>.</span></div>
+    <div class="date" id="dateLabel"></div>
+  </div>
+
+  <div class="mode-toggle" id="modeToggle">
+    <button class="mode-btn active" onclick="setMode('morning')">Morning</button>
+    <button class="mode-btn" onclick="setMode('evening')">Evening</button>
+  </div>
+
+  <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+  <!-- ── MORNING FLOW ── -->
+  <div class="step-container" id="morningFlow">
+
+    <div class="step active" id="m-step-0">
+      <div>
+        <div class="question">How long did you sleep?</div>
+        <div class="question-sub">Hours last night</div>
+      </div>
+      <div class="num-input-row">
+        <button class="num-btn" onclick="adjustNum('sleepHours', -0.5)">−</button>
+        <div>
+          <div class="num-display" id="sleepHoursDisplay">7.0</div>
+          <div class="num-unit">hours</div>
+        </div>
+        <button class="num-btn" onclick="adjustNum('sleepHours', 0.5)">+</button>
+      </div>
+    </div>
+
+    <div class="step" id="m-step-1">
+      <div>
+        <div class="question">Sleep quality?</div>
+        <div class="question-sub">How rested do you feel</div>
+      </div>
+      <div class="rating-group" id="rg-sleepQuality"></div>
+    </div>
+
+    <div class="step" id="m-step-2">
+      <div>
+        <div class="question">Morning energy?</div>
+        <div class="question-sub">Right now, how alive do you feel</div>
+      </div>
+      <div class="rating-group" id="rg-morningEnergy"></div>
+    </div>
+
+    <div class="step" id="m-step-3">
+      <div class="toggle-row" onclick="toggleBool('medsTaken')">
+        <div class="toggle-label">Meds taken</div>
+        <div class="toggle-switch" id="ts-medsTaken"></div>
+      </div>
+    </div>
+
+    <div class="step" id="m-step-4">
+      <div class="toggle-row" onclick="toggleBool('exercise')">
+        <div class="toggle-label">Exercised this morning</div>
+        <div class="toggle-switch" id="ts-exercise"></div>
+      </div>
+      <div class="exercise-minutes" id="exerciseMinutesRow">
+        <div class="question-sub">How many minutes?</div>
+        <div class="num-input-row">
+          <button class="num-btn" onclick="adjustNum('exerciseMinutes', -5)">−</button>
+          <div>
+            <div class="num-display" id="exerciseMinutesDisplay">30</div>
+            <div class="num-unit">min</div>
+          </div>
+          <button class="num-btn" onclick="adjustNum('exerciseMinutes', 5)">+</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step" id="m-step-5">
+      <div>
+        <div class="question">Caffeine so far?</div>
+        <div class="question-sub">Cups of coffee or tea</div>
+      </div>
+      <div class="num-input-row">
+        <button class="num-btn" onclick="adjustNum('caffeineCups', -1)">−</button>
+        <div>
+          <div class="num-display" id="caffeineCupsDisplay">1</div>
+          <div class="num-unit">cups</div>
+        </div>
+        <button class="num-btn" onclick="adjustNum('caffeineCups', 1)">+</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── EVENING FLOW ── -->
+  <div class="step-container" id="eveningFlow" style="display:none">
+
+    <div class="step active" id="e-step-0">
+      <div>
+        <div class="question">Afternoon energy?</div>
+        <div class="question-sub">How was your energy mid-day</div>
+      </div>
+      <div class="rating-group" id="rg-afternoonEnergy"></div>
+    </div>
+
+    <div class="step" id="e-step-1">
+      <div>
+        <div class="question">Mood at end of day?</div>
+      </div>
+      <div class="rating-group" id="rg-moodEOD"></div>
+    </div>
+
+    <div class="step" id="e-step-2">
+      <div>
+        <div class="question">Focus quality today?</div>
+        <div class="question-sub">How deep was your best work</div>
+      </div>
+      <div class="rating-group" id="rg-focusQuality"></div>
+    </div>
+
+    <div class="step" id="e-step-3">
+      <div>
+        <div class="question">Win of the day</div>
+        <div class="question-sub">One thing that went well — even small</div>
+      </div>
+      <textarea class="drift-textarea" id="winText" placeholder="Today I..." rows="4"></textarea>
+    </div>
+
+    <div class="step" id="e-step-4">
+      <div>
+        <div class="question">Where you left off</div>
+        <div class="question-sub">So tomorrow-you knows where to start</div>
+      </div>
+      <textarea class="drift-textarea" id="leftOffText" placeholder="Next thing to pick up..." rows="4"></textarea>
+    </div>
+
+  </div>
+
+  <!-- ── SUCCESS ── -->
+  <div class="success-screen" id="successScreen">
+    <div class="success-icon">✓</div>
+    <div class="success-title" id="successTitle">Logged.</div>
+    <div class="success-sub" id="successSub"></div>
+    <button class="success-again" onclick="resetForm()">Log again</button>
+  </div>
+
+  <!-- ── ERROR ── -->
+  <div class="error-banner" id="errorBanner"></div>
+
+  <!-- ── NAV ── -->
+  <div class="nav-row" id="navRow">
+    <button class="btn-back" id="backBtn" onclick="goBack()" style="display:none">←</button>
+    <button class="btn-next" id="nextBtn" onclick="goNext()">
+      <span class="btn-label">Next</span>
+      <div class="spinner"></div>
+    </button>
+  </div>
+
+  <script>
+    // ── Config ──
+    // Replace with your Vercel deployment URL after deploying
+    const API_URL = 'https://YOUR-PROJECT.vercel.app/api/log';
+
+    // ── State ──
+    const state = {
+      mode: 'morning',
+      step: 0,
+      sleepHours: 7.0,
+      sleepQuality: null,
+      morningEnergy: null,
+      medsTaken: false,
+      exercise: false,
+      exerciseMinutes: 30,
+      caffeineCups: 1,
+      afternoonEnergy: null,
+      moodEOD: null,
+      focusQuality: null,
+    };
+
+    const M_STEPS = 6;
+    const E_STEPS = 5;
+
+    // Steps that require a rating selection before allowing Next
+    const RATING_REQUIRED = {
+      morning: { 1: 'sleepQuality', 2: 'morningEnergy' },
+      evening: { 0: 'afternoonEnergy', 1: 'moodEOD', 2: 'focusQuality' },
+    };
+
+    // ── Init ──
+    document.getElementById('dateLabel').textContent =
+      new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    buildRatingGroup('rg-sleepQuality',   'sleepQuality');
+    buildRatingGroup('rg-morningEnergy',  'morningEnergy');
+    buildRatingGroup('rg-afternoonEnergy','afternoonEnergy');
+    buildRatingGroup('rg-moodEOD',        'moodEOD');
+    buildRatingGroup('rg-focusQuality',   'focusQuality');
+
+    updateProgress();
+    updateNextBtn();
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    // ── Rating groups ──
+    function buildRatingGroup(containerId, key) {
+      const el = document.getElementById(containerId);
+      for (let i = 1; i <= 5; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'rating-btn';
+        btn.textContent = i;
+        btn.onclick = () => selectRating(key, i, containerId);
+        el.appendChild(btn);
+      }
+    }
+
+    function selectRating(key, val, containerId) {
+      state[key] = val;
+      document.querySelectorAll(`#${containerId} .rating-btn`).forEach((b, i) => {
+        b.classList.toggle('selected', i + 1 === val);
+      });
+      vibrate(8);
+      updateNextBtn();
+    }
+
+    // ── Number inputs ──
+    const NUM_CONFIG = {
+      sleepHours:      { min: 0,  max: 14, step: 0.5, display: 'sleepHoursDisplay',     fmt: v => v.toFixed(1) },
+      caffeineCups:    { min: 0,  max: 10, step: 1,   display: 'caffeineCupsDisplay',   fmt: v => v },
+      exerciseMinutes: { min: 0,  max: 180, step: 5,  display: 'exerciseMinutesDisplay', fmt: v => v },
+    };
+
+    function adjustNum(key, delta) {
+      const c = NUM_CONFIG[key];
+      state[key] = Math.max(c.min, Math.min(c.max, state[key] + delta));
+      document.getElementById(c.display).textContent = c.fmt(state[key]);
+      vibrate(6);
+    }
+
+    // ── Toggles ──
+    function toggleBool(key) {
+      state[key] = !state[key];
+      document.getElementById('ts-' + key).classList.toggle('on', state[key]);
+      if (key === 'exercise') {
+        document.getElementById('exerciseMinutesRow').classList.toggle('visible', state.exercise);
+      }
+      vibrate(8);
+    }
+
+    // ── Mode ──
+    function setMode(m) {
+      state.mode = m;
+      state.step = 0;
+      document.querySelectorAll('.mode-btn').forEach((b, i) => {
+        b.classList.toggle('active', (i === 0) === (m === 'morning'));
+      });
+      document.getElementById('morningFlow').style.display = m === 'morning' ? 'block' : 'none';
+      document.getElementById('eveningFlow').style.display = m === 'evening' ? 'block' : 'none';
+      document.getElementById('successScreen').classList.remove('active');
+      document.getElementById('navRow').style.display = 'flex';
+      document.getElementById('modeToggle').style.display = 'flex';
+      document.getElementById('errorBanner').classList.remove('visible');
+      resetSteps();
+      updateProgress();
+      updateNextBtn();
+    }
+
+    function resetSteps() {
+      document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+      const prefix = state.mode === 'morning' ? 'm' : 'e';
+      document.getElementById(`${prefix}-step-0`).classList.add('active');
+      document.getElementById('backBtn').style.display = 'none';
+    }
+
+    // ── Navigation ──
+    function goNext() {
+      const total = state.mode === 'morning' ? M_STEPS : E_STEPS;
+      if (state.step < total - 1) {
+        setStep(state.step + 1);
+      } else {
+        submitLog();
+      }
+    }
+
+    function goBack() {
+      if (state.step > 0) setStep(state.step - 1);
+    }
+
+    function setStep(n) {
+      const prefix = state.mode === 'morning' ? 'm' : 'e';
+      document.getElementById(`${prefix}-step-${state.step}`).classList.remove('active');
+      state.step = n;
+      document.getElementById(`${prefix}-step-${n}`).classList.add('active');
+      document.getElementById('backBtn').style.display = n > 0 ? 'flex' : 'none';
+      const total = state.mode === 'morning' ? M_STEPS : E_STEPS;
+      document.querySelector('#nextBtn .btn-label').textContent = n === total - 1 ? 'Submit' : 'Next';
+      updateProgress();
+      updateNextBtn();
+      document.getElementById('errorBanner').classList.remove('visible');
+    }
+
+    function updateProgress() {
+      const total = state.mode === 'morning' ? M_STEPS : E_STEPS;
+      document.getElementById('progressFill').style.width = ((state.step + 1) / total * 100) + '%';
+    }
+
+    function updateNextBtn() {
+      const required = RATING_REQUIRED[state.mode]?.[state.step];
+      document.getElementById('nextBtn').disabled = required ? state[required] === null : false;
+    }
+
+    // ── Submit ──
+    async function submitLog() {
+      const btn = document.getElementById('nextBtn');
+      btn.classList.add('loading');
+      btn.disabled = true;
+      document.getElementById('errorBanner').classList.remove('visible');
+
+      const today = new Date().toISOString().split('T')[0];
+      const payload = { date: today };
+
+      if (state.mode === 'morning') {
+        payload.sleepHours      = state.sleepHours;
+        payload.sleepQuality    = state.sleepQuality;
+        payload.morningEnergy   = state.morningEnergy;
+        payload.medsTaken       = state.medsTaken;
+        payload.exercise        = state.exercise;
+        payload.exerciseMinutes = state.exercise ? state.exerciseMinutes : 0;
+        payload.caffeineCups    = state.caffeineCups;
+      } else {
+        payload.afternoonEnergy = state.afternoonEnergy;
+        payload.moodEOD         = state.moodEOD;
+        payload.focusQuality    = state.focusQuality;
+        payload.winOfDay        = document.getElementById('winText').value.trim();
+        payload.whereLeftOff    = document.getElementById('leftOffText').value.trim();
+      }
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
+        showSuccess();
+      } catch (err) {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        const banner = document.getElementById('errorBanner');
+        banner.textContent = 'Could not save — check your connection and try again.';
+        banner.classList.add('visible');
+      }
+    }
+
+    function showSuccess() {
+      document.getElementById('morningFlow').style.display = 'none';
+      document.getElementById('eveningFlow').style.display = 'none';
+      document.getElementById('navRow').style.display = 'none';
+      document.getElementById('modeToggle').style.display = 'none';
+      document.getElementById('progressFill').style.width = '100%';
+      document.getElementById('successSub').innerHTML = state.mode === 'morning'
+        ? 'Morning check-in saved.<br>See you tonight.'
+        : 'Evening check-in saved.<br>Good night.';
+      document.getElementById('successScreen').classList.add('active');
+      vibrate([10, 50, 10]);
+    }
+
+    function resetForm() {
+      // Reset ratings
+      ['sleepQuality','morningEnergy','afternoonEnergy','moodEOD','focusQuality']
+        .forEach(k => { state[k] = null; });
+      document.querySelectorAll('.rating-btn').forEach(b => b.classList.remove('selected'));
+      // Reset textareas
+      document.getElementById('winText').value = '';
+      document.getElementById('leftOffText').value = '';
+      setMode(state.mode);
+    }
+
+    // ── Utils ──
+    function vibrate(pattern) {
+      if (window.navigator?.vibrate) window.navigator.vibrate(pattern);
+    }
+  </script>
+</body>
+</html>
