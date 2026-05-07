@@ -8,13 +8,13 @@ Personal ADHD companion app. Daily logging, brain dump, task breakdown, and focu
 
 ## What it does
 
-- **Daily log** — morning (sleep, energy, meds, exercise) and evening (mood, focus, win of the day) check-ins
-- **Brain dump** — capture whatever's in your head, no structure needed; AI surfaces themes
-- **Task breakdown** — paste something daunting, get micro-steps so small you can't not start
-- **Focus timer** — declare your task, start a session, body double mode
-- **Insights** — trends on sleep, mood, focus, meds adherence over time; AI pattern report
+- **Daily log** — step-by-step morning (sleep, energy, meds, exercise) and evening (mood, focus, win of the day) check-ins; pre-fills existing values if you return to edit
+- **Brain dump** — capture whatever's in your head, no structure needed; AI surfaces recurring themes across entries
+- **Task breakdown** — paste something daunting, get micro-steps so small you can't not start; steps persist across sessions via localStorage
+- **Focus timer** — declare your task, pick a duration, body double mode; plays a chime and sends a browser notification when time's up
+- **Insights** — 30-day trends on sleep, mood, focus, meds adherence; win log; AI pattern report
 
-Logs are stored in Notion. The Telegram bot lets you log from your phone without opening the app.
+Logs are stored in Notion. The Telegram bot provides an alternative logging flow from any device.
 
 ---
 
@@ -22,7 +22,7 @@ Logs are stored in Notion. The Telegram bot lets you log from your phone without
 
 | Layer | Tech |
 |---|---|
-| Frontend | Next.js 16 (App Router), Tailwind CSS, shadcn/ui |
+| Frontend | Next.js 16 (App Router), Tailwind CSS, shadcn/ui, PWA |
 | Backend | FastAPI (Python), deployed on Render |
 | Database | Notion (via REST API) |
 | AI | Claude Haiku (`claude-haiku-4-5-20251001`) |
@@ -36,6 +36,9 @@ Logs are stored in Notion. The Telegram bot lets you log from your phone without
 ```
 drift/
 ├── web/              # Next.js frontend (PWA)
+│   ├── app/          # Pages: /, /log, /capture, /focus, /breakdown, /insights
+│   ├── components/   # Sidebar, mobile nav, page transition, shadcn/ui
+│   └── lib/          # API client, types, utils
 ├── backend/          # FastAPI backend
 │   ├── main.py       # API routes
 │   ├── notion.py     # Notion DB client
@@ -69,4 +72,4 @@ See [SETUP.md](./SETUP.md) for full deployment instructions.
 
 ## Notes
 
-The FastAPI backend runs on Render's free tier, which sleeps after 15 minutes of inactivity. First API call of the day may take ~30 seconds to warm up. Upgrade to a paid Render instance to eliminate this.
+The FastAPI backend runs on Render's free tier, which sleeps after 15 minutes of inactivity. The first API call of the day takes ~30 seconds to warm up — the frontend loads instantly from Vercel, only the data fetch is delayed. Upgrade to a paid Render instance ($7/month) to eliminate this.
