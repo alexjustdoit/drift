@@ -2,3 +2,6 @@
 .env.local
 node_modules/
 .vercel/
+backend/venv/
+web/.next/
+web/node_modules/
