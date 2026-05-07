@@ -1,7 +1,29 @@
-# Render deployment config for the Drift Telegram bot
-# Import this repo at render.com → New Web Service
+# Render deployment config for Drift services
+# Import this repo at render.com → New Blueprint
 
 services:
+
+  # ── FastAPI backend (new) ──────────────────────────────────────────────────
+  - type: web
+    name: drift-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: NOTION_TOKEN
+        sync: false
+      - key: NOTION_DB_ID
+        value: 563f330f487444bb9f1c8ad7513a08d3
+      - key: NOTION_TIME_AUDIT_DB_ID
+        value: b7daea375320484daedf927ed9fa809c
+      - key: NOTION_CAPTURE_DB_ID
+        value: 4b3331a7b9db4ca09d36a693ace404f7
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # ── Telegram bot ───────────────────────────────────────────────────────────
   - type: web
     name: drift-telegram-bot
     runtime: python
@@ -11,22 +33,22 @@ services:
     plan: free
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false          # set manually in Render dashboard
+        sync: false
       - key: TELEGRAM_CHAT_ID
-        sync: false          # your Telegram user ID — get it from @userinfobot
+        sync: false
       - key: NOTION_TOKEN
         sync: false
       - key: NOTION_DB_ID
-        sync: false
+        value: 563f330f487444bb9f1c8ad7513a08d3
+      - key: NOTION_TIME_AUDIT_DB_ID
+        value: b7daea375320484daedf927ed9fa809c
       - key: MORNING_TIME
         value: "08:00"
       - key: EVENING_TIME
         value: "20:00"
       - key: DIGEST_DAY
-        value: "6"           # 0=Mon … 6=Sun
+        value: "6"
       - key: DIGEST_TIME
         value: "18:00"
       - key: TIMEZONE
         value: "America/New_York"
-      - key: NOTION_TIME_AUDIT_DB_ID
-        sync: false          # optional — enables /time command
