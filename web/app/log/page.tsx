@@ -111,9 +111,6 @@ interface MorningData {
   sleep_quality: number | null
   morning_energy: number | null
   meds_taken: boolean
-  exercise: boolean
-  exercise_minutes: string
-  caffeine_cups: string
 }
 
 function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEntry>) => void; initialData?: DayLog | null }) {
@@ -123,9 +120,6 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
     sleep_quality: initialData?.sleep_quality ?? null,
     morning_energy: initialData?.morning_energy ?? null,
     meds_taken: initialData?.meds_taken ?? false,
-    exercise: initialData?.exercise ?? false,
-    exercise_minutes: initialData?.exercise_minutes != null ? String(initialData.exercise_minutes) : '',
-    caffeine_cups: initialData?.caffeine_cups != null ? String(initialData.caffeine_cups) : '',
   })
 
   const steps = [
@@ -180,54 +174,6 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
         </div>
       ),
     },
-    {
-      title: 'Movement & caffeine',
-      content: (
-        <div className="flex flex-col gap-5">
-          <Toggle
-            checked={data.exercise}
-            onChange={v => setData(d => ({ ...d, exercise: v }))}
-            label="I exercised this morning"
-          />
-          {data.exercise && (
-            <div>
-              <p className="text-base font-medium mb-3">Minutes</p>
-              <div className="flex items-center gap-3">
-                <Input
-                  type="number"
-                  min="0"
-                  placeholder="e.g. 30"
-                  value={data.exercise_minutes}
-                  onChange={e => setData(d => ({ ...d, exercise_minutes: e.target.value }))}
-                  className="w-28 text-center text-xl h-14 font-semibold"
-                />
-                <span className="text-muted-foreground">min</span>
-              </div>
-            </div>
-          )}
-          <div>
-            <p className="text-base font-medium mb-3">Caffeine</p>
-            <div className="flex gap-2">
-              {[0, 1, 2, 3, 4].map(n => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setData(d => ({ ...d, caffeine_cups: String(n) }))}
-                  className={cn(
-                    'flex-1 h-14 rounded-xl border-2 text-sm font-bold transition-all',
-                    String(n) === data.caffeine_cups
-                      ? 'bg-primary border-primary text-primary-foreground scale-105'
-                      : 'border-border text-muted-foreground hover:border-primary/50'
-                  )}
-                >
-                  {n} ☕
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      ),
-    },
   ]
 
   const isLast = step === steps.length - 1
@@ -239,9 +185,6 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
         sleep_quality: data.sleep_quality ?? undefined,
         morning_energy: data.morning_energy ?? undefined,
         meds_taken: data.meds_taken,
-        exercise: data.exercise,
-        exercise_minutes: data.exercise && data.exercise_minutes ? parseInt(data.exercise_minutes) : undefined,
-        caffeine_cups: data.caffeine_cups ? parseFloat(data.caffeine_cups) : undefined,
       })
     } else {
       setStep(s => s + 1)
@@ -257,6 +200,9 @@ interface EveningData {
   afternoon_energy: number | null
   mood_eod: number | null
   focus_quality: number | null
+  exercise: boolean
+  exercise_minutes: string
+  caffeine_cups: string
   win_of_day: string
   where_left_off: string
   notes: string
@@ -268,6 +214,9 @@ function EveningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
     afternoon_energy: initialData?.afternoon_energy ?? null,
     mood_eod: initialData?.mood_eod ?? null,
     focus_quality: initialData?.focus_quality ?? null,
+    exercise: initialData?.exercise ?? false,
+    exercise_minutes: initialData?.exercise_minutes != null ? String(initialData.exercise_minutes) : '',
+    caffeine_cups: initialData?.caffeine_cups != null ? String(initialData.caffeine_cups) : '',
     win_of_day: initialData?.win_of_day ?? '',
     where_left_off: initialData?.where_left_off ?? '',
     notes: initialData?.notes ?? '',
@@ -308,6 +257,54 @@ function EveningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
           high="locked in"
           emoji
         />
+      ),
+    },
+    {
+      title: 'Movement & caffeine',
+      content: (
+        <div className="flex flex-col gap-5">
+          <Toggle
+            checked={data.exercise}
+            onChange={v => setData(d => ({ ...d, exercise: v }))}
+            label="I exercised today"
+          />
+          {data.exercise && (
+            <div>
+              <p className="text-base font-medium mb-3">Minutes</p>
+              <div className="flex items-center gap-3">
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder="e.g. 30"
+                  value={data.exercise_minutes}
+                  onChange={e => setData(d => ({ ...d, exercise_minutes: e.target.value }))}
+                  className="w-28 text-center text-xl h-14 font-semibold"
+                />
+                <span className="text-muted-foreground">min</span>
+              </div>
+            </div>
+          )}
+          <div>
+            <p className="text-base font-medium mb-3">Caffeine</p>
+            <div className="flex gap-2">
+              {[0, 1, 2, 3, 4].map(n => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setData(d => ({ ...d, caffeine_cups: String(n) }))}
+                  className={cn(
+                    'flex-1 h-14 rounded-xl border-2 text-sm font-bold transition-all',
+                    String(n) === data.caffeine_cups
+                      ? 'bg-primary border-primary text-primary-foreground scale-105'
+                      : 'border-border text-muted-foreground hover:border-primary/50'
+                  )}
+                >
+                  {n} ☕
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       ),
     },
     {
@@ -363,6 +360,9 @@ function EveningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
         afternoon_energy: data.afternoon_energy ?? undefined,
         mood_eod: data.mood_eod ?? undefined,
         focus_quality: data.focus_quality ?? undefined,
+        exercise: data.exercise,
+        exercise_minutes: data.exercise && data.exercise_minutes ? parseInt(data.exercise_minutes) : undefined,
+        caffeine_cups: data.caffeine_cups ? parseFloat(data.caffeine_cups) : undefined,
         win_of_day: data.win_of_day || undefined,
         where_left_off: data.where_left_off || undefined,
         notes: data.notes || undefined,
