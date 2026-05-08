@@ -242,19 +242,19 @@ def _send_daily_reminder(hour: int, title: str, body: str) -> None:
 
 
 def _schedule_daily_reminders() -> None:
-    """Schedule 9am and 10pm reminders in the user's timezone."""
+    """Schedule reminders in the user's timezone. Currently 12pm and 12:05pm for testing."""
     global _stored_timezone
     if not _stored_timezone:
         return
     try:
         tz = pytz.timezone(_stored_timezone)
         scheduler.add_job(
-            lambda: _send_daily_reminder(9, '☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
-            'cron', hour=9, minute=0, timezone=tz, id='reminder_9am', replace_existing=True
+            lambda: _send_daily_reminder(12, '☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
+            'cron', hour=12, minute=0, timezone=tz, id='reminder_noon', replace_existing=True
         )
         scheduler.add_job(
-            lambda: _send_daily_reminder(22, '🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
-            'cron', hour=22, minute=0, timezone=tz, id='reminder_10pm', replace_existing=True
+            lambda: _send_daily_reminder(12, '🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
+            'cron', hour=12, minute=5, timezone=tz, id='reminder_noon_5', replace_existing=True
         )
     except Exception:
         pass
