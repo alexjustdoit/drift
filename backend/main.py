@@ -13,6 +13,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pywebpush import webpush, WebPushException
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
 
 import notion
 import ai
@@ -29,6 +31,15 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+# Initialize scheduler
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+
+@app.on_event('shutdown')
+def shutdown():
+    scheduler.shutdown()
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -181,6 +192,11 @@ class PushSubscription(BaseModel):
     expirationTime: Optional[Any] = None
 
 
+class PushSubscribeRequest(BaseModel):
+    subscription: PushSubscription
+    timezone: str
+
+
 class TimerPushRequest(BaseModel):
     end_time_ms: float
     task: str
@@ -189,6 +205,10 @@ class TimerPushRequest(BaseModel):
 
 # Holds the single pending timer task (single-user app)
 _pending_push_task: Optional[asyncio.Task] = None
+
+# Store subscriptions with timezone for daily reminders
+_stored_subscription: Optional[Dict] = None
+_stored_timezone: Optional[str] = None
 
 
 def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
@@ -205,9 +225,47 @@ def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
         pass
 
 
+def _send_daily_reminder(hour: int, title: str, body: str) -> None:
+    """Send a reminder push. Called by scheduled jobs."""
+    global _stored_subscription
+    if not _stored_subscription:
+        return
+    try:
+        webpush(
+            subscription_info={'endpoint': _stored_subscription['endpoint'], 'keys': _stored_subscription['keys']},
+            data=json.dumps({'title': title, 'body': body, 'url': '/log'}),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={'sub': VAPID_EMAIL},
+        )
+    except WebPushException:
+        pass
+
+
+def _schedule_daily_reminders() -> None:
+    """Schedule 9am and 10pm reminders in the user's timezone."""
+    global _stored_timezone
+    if not _stored_timezone:
+        return
+    try:
+        tz = pytz.timezone(_stored_timezone)
+        scheduler.add_job(
+            lambda: _send_daily_reminder(9, '☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
+            'cron', hour=9, minute=0, timezone=tz, id='reminder_9am', replace_existing=True
+        )
+        scheduler.add_job(
+            lambda: _send_daily_reminder(22, '🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
+            'cron', hour=22, minute=0, timezone=tz, id='reminder_10pm', replace_existing=True
+        )
+    except Exception:
+        pass
+
+
 @app.post('/push/subscribe')
-def push_subscribe(sub: PushSubscription):
-    # Just validates the subscription is well-formed; we use the one sent with /push/timer
+def push_subscribe(req: PushSubscribeRequest):
+    global _stored_subscription, _stored_timezone
+    _stored_subscription = req.subscription.model_dump()
+    _stored_timezone = req.timezone
+    _schedule_daily_reminders()
     return {'ok': True}
 
 

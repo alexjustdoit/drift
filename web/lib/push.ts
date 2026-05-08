@@ -11,21 +11,43 @@ function urlBase64ToUint8Array(base64: string): ArrayBuffer {
   return buf
 }
 
+export function getUserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
 export async function ensurePushSubscription(): Promise<PushSubscription | null> {
   if (typeof window === 'undefined') return null
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null
   try {
     const reg = await navigator.serviceWorker.ready
     const existing = await reg.pushManager.getSubscription()
-    if (existing) return existing
+    if (existing) {
+      await registerSubscriptionWithBackend(existing)
+      return existing
+    }
     const perm = await Notification.requestPermission()
     if (perm !== 'granted') return null
-    return reg.pushManager.subscribe({
+    const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
     })
+    await registerSubscriptionWithBackend(sub)
+    return sub
   } catch {
     return null
+  }
+}
+
+async function registerSubscriptionWithBackend(sub: PushSubscription): Promise<void> {
+  const timezone = getUserTimezone()
+  try {
+    await fetch(`${API_URL}/push/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON(), timezone }),
+    })
+  } catch {
+    // fail silently
   }
 }
 
