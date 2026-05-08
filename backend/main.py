@@ -22,6 +22,7 @@ import ai
 VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
 VAPID_EMAIL = os.getenv('VAPID_EMAIL', 'mailto:admin@example.com')
+PUSH_SUB_FILE = os.path.join(os.path.dirname(__file__), 'push_sub.json')
 
 app = FastAPI(title='Drift API')
 
@@ -35,6 +36,11 @@ app.add_middleware(
 # Initialize scheduler
 scheduler = BackgroundScheduler()
 scheduler.start()
+
+
+@app.on_event('startup')
+def startup():
+    _load_subscription()
 
 
 @app.on_event('shutdown')
@@ -211,6 +217,27 @@ _stored_subscription: Optional[Dict] = None
 _stored_timezone: Optional[str] = None
 
 
+def _persist_subscription() -> None:
+    try:
+        with open(PUSH_SUB_FILE, 'w') as f:
+            json.dump({'subscription': _stored_subscription, 'timezone': _stored_timezone}, f)
+    except Exception:
+        pass
+
+
+def _load_subscription() -> None:
+    global _stored_subscription, _stored_timezone
+    try:
+        with open(PUSH_SUB_FILE) as f:
+            data = json.load(f)
+        _stored_subscription = data.get('subscription')
+        _stored_timezone = data.get('timezone')
+        if _stored_subscription and _stored_timezone:
+            _schedule_daily_reminders()
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+
+
 def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
     if not VAPID_PRIVATE_KEY:
         return
@@ -225,7 +252,7 @@ def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
         pass
 
 
-def _send_daily_reminder(hour: int, title: str, body: str) -> None:
+def _send_daily_reminder(title: str, body: str) -> None:
     """Send a reminder push. Called by scheduled jobs."""
     global _stored_subscription
     if not _stored_subscription:
@@ -242,19 +269,19 @@ def _send_daily_reminder(hour: int, title: str, body: str) -> None:
 
 
 def _schedule_daily_reminders() -> None:
-    """Schedule reminders in the user's timezone. Currently 12pm and 12:05pm for testing."""
+    """Schedule 9am morning and 10pm evening reminders in the user's timezone."""
     global _stored_timezone
     if not _stored_timezone:
         return
     try:
         tz = pytz.timezone(_stored_timezone)
         scheduler.add_job(
-            lambda: _send_daily_reminder(12, '☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
-            'cron', hour=12, minute=0, timezone=tz, id='reminder_noon', replace_existing=True
+            lambda: _send_daily_reminder('☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
+            'cron', hour=9, minute=0, timezone=tz, id='reminder_morning', replace_existing=True
         )
         scheduler.add_job(
-            lambda: _send_daily_reminder(12, '🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
-            'cron', hour=12, minute=5, timezone=tz, id='reminder_noon_5', replace_existing=True
+            lambda: _send_daily_reminder('🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
+            'cron', hour=22, minute=0, timezone=tz, id='reminder_evening', replace_existing=True
         )
     except Exception:
         pass
@@ -265,6 +292,7 @@ def push_subscribe(req: PushSubscribeRequest):
     global _stored_subscription, _stored_timezone
     _stored_subscription = req.subscription.model_dump()
     _stored_timezone = req.timezone
+    _persist_subscription()
     _schedule_daily_reminders()
     return {'ok': True}
 

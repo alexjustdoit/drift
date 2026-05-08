@@ -5,3 +5,4 @@ node_modules/
 backend/venv/
 web/.next/
 web/node_modules/
+backend/push_sub.json
