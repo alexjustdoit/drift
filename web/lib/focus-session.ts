@@ -25,7 +25,7 @@ export async function fetchSession(): Promise<ActiveSession | null> {
     const res = await fetch(`${API_URL}/focus/session`, { cache: 'no-store' })
     if (!res.ok) return null
     const data = await res.json()
-    return data.task ? (data as ActiveSession) : null
+    return data.phase ? (data as ActiveSession) : null
   } catch {
     return null
   }

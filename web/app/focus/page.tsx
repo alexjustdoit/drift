@@ -98,7 +98,7 @@ export default function FocusPage() {
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission()
     }
-  }, [effectiveDuration])
+  }, [effectiveDuration, task])
 
   const pause = useCallback(() => {
     endTimeRef.current = null
