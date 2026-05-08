@@ -5,6 +5,7 @@ import { CheckCircle2, Pause, Play, RotateCcw, Timer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { schedulePush, cancelPush } from '@/lib/push'
 
 type Phase = 'setup' | 'running' | 'paused' | 'done'
 
@@ -67,10 +68,12 @@ export default function FocusPage() {
 
   const start = useCallback(() => {
     const secs = effectiveDuration
-    endTimeRef.current = Date.now() + secs * 1000
+    const endMs = Date.now() + secs * 1000
+    endTimeRef.current = endMs
     setRemaining(secs)
     setTotal(secs)
     setPhase('running')
+    schedulePush(endMs, task).catch(() => {})
 
     // Create and unlock AudioContext during user gesture (required for iOS)
     if (!audioCtxRef.current) {
@@ -97,16 +100,20 @@ export default function FocusPage() {
 
   const pause = useCallback(() => {
     endTimeRef.current = null
+    cancelPush().catch(() => {})
     setPhase('paused')
   }, [])
 
   const resume = useCallback(() => {
-    endTimeRef.current = Date.now() + remaining * 1000
+    const endMs = Date.now() + remaining * 1000
+    endTimeRef.current = endMs
+    schedulePush(endMs, task).catch(() => {})
     setPhase('running')
-  }, [remaining])
+  }, [remaining, task])
 
   const reset = useCallback(() => {
     endTimeRef.current = null
+    cancelPush().catch(() => {})
     setPhase('setup')
     setTask('')
     setRemaining(0)

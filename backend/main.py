@@ -1,7 +1,10 @@
 """Drift FastAPI backend — Notion proxy + AI endpoints."""
 
+import asyncio
+import json
+import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -9,9 +12,14 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from pywebpush import webpush, WebPushException
 
 import notion
 import ai
+
+VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
+VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
+VAPID_EMAIL = os.getenv('VAPID_EMAIL', 'mailto:admin@example.com')
 
 app = FastAPI(title='Drift API')
 
@@ -131,6 +139,68 @@ def post_time_audit(entry: TimeAuditEntry):
 @app.get('/time-audit')
 def get_time_audit(days: int = Query(90, ge=1, le=365)):
     return notion.fetch_time_audit(days)
+
+
+# ── Push notification endpoints ───────────────────────────────────────────────
+
+class PushSubscription(BaseModel):
+    endpoint: str
+    keys: Dict[str, str]
+    expirationTime: Optional[Any] = None
+
+
+class TimerPushRequest(BaseModel):
+    end_time_ms: float
+    task: str
+    subscription: PushSubscription
+
+
+# Holds the single pending timer task (single-user app)
+_pending_push_task: Optional[asyncio.Task] = None
+
+
+def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
+    if not VAPID_PRIVATE_KEY:
+        return
+    try:
+        webpush(
+            subscription_info={'endpoint': subscription.endpoint, 'keys': subscription.keys},
+            data=json.dumps({'title': title, 'body': body, 'url': '/focus'}),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={'sub': VAPID_EMAIL},
+        )
+    except WebPushException:
+        pass
+
+
+@app.post('/push/subscribe')
+def push_subscribe(sub: PushSubscription):
+    # Just validates the subscription is well-formed; we use the one sent with /push/timer
+    return {'ok': True}
+
+
+@app.post('/push/timer')
+async def push_timer(req: TimerPushRequest):
+    global _pending_push_task
+    if _pending_push_task and not _pending_push_task.done():
+        _pending_push_task.cancel()
+
+    delay = max(0, (req.end_time_ms - datetime.utcnow().timestamp() * 1000) / 1000)
+
+    async def _fire():
+        await asyncio.sleep(delay)
+        _send_push(req.subscription, 'Session complete 🎉', req.task)
+
+    _pending_push_task = asyncio.create_task(_fire())
+    return {'ok': True, 'fires_in_seconds': round(delay)}
+
+
+@app.post('/push/cancel')
+async def push_cancel():
+    global _pending_push_task
+    if _pending_push_task and not _pending_push_task.done():
+        _pending_push_task.cancel()
+    return {'ok': True}
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
