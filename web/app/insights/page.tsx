@@ -228,6 +228,57 @@ function TaskRow({ entry: e }: { entry: TimeAuditEntry }) {
   )
 }
 
+function HistoryTab({ logs }: { logs: DayLog[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const sorted = [...logs].sort((a, b) => b.date.localeCompare(a.date))
+
+  if (sorted.length === 0) {
+    return (
+      <div className="text-center py-10 text-muted-foreground">
+        <p className="text-sm">No logs yet. Start your first check-in.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {sorted.map(d => (
+        <Card
+          key={d.date}
+          className="cursor-pointer"
+          onClick={() => setExpanded(expanded === d.date ? null : d.date)}
+        >
+          <CardContent className="py-4 px-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium">{format(parseISO(d.date), 'EEE, MMM d')}</p>
+              <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                {d.sleep_hours != null && <span>😴 {d.sleep_hours}h</span>}
+                {d.focus_quality != null && <span>🎯 {d.focus_quality}/5</span>}
+                {d.mood_eod != null && <span>😊 {d.mood_eod}/5</span>}
+              </div>
+            </div>
+            {expanded === d.date && (
+              <div className="mt-3 pt-3 border-t border-border flex flex-col gap-1.5">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  {d.sleep_quality != null && <span className="text-muted-foreground">Sleep quality: <span className="text-foreground">{d.sleep_quality}/5</span></span>}
+                  {d.morning_energy != null && <span className="text-muted-foreground">Morning energy: <span className="text-foreground">{d.morning_energy}/5</span></span>}
+                  {d.afternoon_energy != null && <span className="text-muted-foreground">Afternoon energy: <span className="text-foreground">{d.afternoon_energy}/5</span></span>}
+                  {d.caffeine_cups != null && <span className="text-muted-foreground">Caffeine: <span className="text-foreground">{d.caffeine_cups} cups</span></span>}
+                  {d.meds_taken != null && <span className="text-muted-foreground">Meds: <span className="text-foreground">{d.meds_taken ? 'Yes' : 'No'}</span></span>}
+                  {d.exercise != null && <span className="text-muted-foreground">Exercise: <span className="text-foreground">{d.exercise ? `${d.exercise_minutes ?? '?'} min` : 'No'}</span></span>}
+                </div>
+                {d.win_of_day && <p className="text-xs mt-1"><span className="text-muted-foreground">Win: </span>{d.win_of_day}</p>}
+                {d.where_left_off && <p className="text-xs"><span className="text-muted-foreground">Left off: </span>{d.where_left_off}</p>}
+                {d.notes && <p className="text-xs"><span className="text-muted-foreground">Notes: </span>{d.notes}</p>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
 function TimeAuditTab() {
   const today = format(new Date(), 'yyyy-MM-dd')
   const [entries, setEntries] = useState<TimeAuditEntry[]>([])
@@ -389,15 +440,17 @@ export default function InsightsPage() {
           </div>
         ) : (
           <Tabs defaultValue="overview">
-            <TabsList className="w-full grid grid-cols-5 mb-6 h-10">
-              <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-              <TabsTrigger value="patterns" className="text-xs">Patterns</TabsTrigger>
-              <TabsTrigger value="wins" className="text-xs">Wins</TabsTrigger>
-              <TabsTrigger value="ai" className="text-xs">AI</TabsTrigger>
-              <TabsTrigger value="time" className="text-xs">Time</TabsTrigger>
+            <TabsList className="w-full grid grid-cols-6 mb-6 h-10">
+              <TabsTrigger value="overview" className="text-[10px]">Stats</TabsTrigger>
+              <TabsTrigger value="patterns" className="text-[10px]">Trends</TabsTrigger>
+              <TabsTrigger value="history" className="text-[10px]">History</TabsTrigger>
+              <TabsTrigger value="wins" className="text-[10px]">Wins</TabsTrigger>
+              <TabsTrigger value="ai" className="text-[10px]">AI</TabsTrigger>
+              <TabsTrigger value="time" className="text-[10px]">Time</TabsTrigger>
             </TabsList>
             <TabsContent value="overview"><OverviewTab logs={logs} /></TabsContent>
             <TabsContent value="patterns"><PatternsTab logs={logs} /></TabsContent>
+            <TabsContent value="history"><HistoryTab logs={logs} /></TabsContent>
             <TabsContent value="wins"><WinLogTab logs={logs} /></TabsContent>
             <TabsContent value="ai"><AIReportTab logs={logs} /></TabsContent>
             <TabsContent value="time"><TimeAuditTab /></TabsContent>

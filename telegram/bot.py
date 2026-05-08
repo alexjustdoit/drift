@@ -304,6 +304,25 @@ async def t_productivity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await edit(update, f'Logged. ✓ _{planned}min planned → {actual}min actual ({diff_str}min)_')
     return ConversationHandler.END
 
+# ── Start / Help ──────────────────────────────────────────────────────────────
+
+HELP_TEXT = (
+    '👋 *Drift — ADHD daily companion*\n\n'
+    'Available commands:\n\n'
+    '/morning — morning check\\-in \\(sleep, energy, meds, exercise\\)\n'
+    '/evening — evening check\\-in \\(mood, focus, win of the day\\)\n'
+    '/now — quick mid\\-day energy \\+ mood snapshot\n'
+    '/time — log planned vs actual time for a task\n'
+    '/help — show this message\n'
+    '/cancel — cancel the current flow'
+)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.effective_chat.send_message(HELP_TEXT, parse_mode='MarkdownV2')
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.effective_chat.send_message(HELP_TEXT, parse_mode='MarkdownV2')
+
 # ── Cancel ────────────────────────────────────────────────────────────────────
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -378,6 +397,9 @@ def main():
     threading.Thread(target=start_health_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('help', help_cmd))
 
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler('morning', morning_start)],
