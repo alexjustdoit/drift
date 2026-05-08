@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { getLogs, getYesterday, postLog } from '@/lib/api'
+import { getCachedLogs, setCachedLogs, getTodayFromCache } from '@/lib/cache'
 import type { DayLog, LogEntry } from '@/lib/types'
 
 type Tab = 'morning' | 'evening'
@@ -456,15 +457,29 @@ function LogPageContent() {
 
   useEffect(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
+
+    // Try cache first for instant load
+    const cachedToday = getTodayFromCache(today)
+    if (cachedToday) {
+      setTodayLog(cachedToday)
+    }
+
+    // Fetch fresh data in background
     Promise.all([
-      getLogs(2).then(logs => logs.find(l => l.date === today) ?? null),
+      getLogs(2).then(logs => {
+        const todayLog = logs.find(l => l.date === today) ?? null
+        setTodayLog(todayLog)
+        setCachedLogs(logs)
+        return todayLog
+      }),
       getYesterday(),
     ])
-      .then(([existing, yesterday]) => {
-        setTodayLog(existing)
+      .then(([_, yesterday]) => {
         setLeftOff(yesterday.text)
       })
-      .catch(() => setTodayLog(null))
+      .catch(() => {
+        if (!cachedToday) setTodayLog(null)
+      })
   }, [])
 
   const handleSubmit = useCallback(async (data: Partial<LogEntry>) => {
