@@ -20,7 +20,7 @@ export function MobileNav() {
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-sidebar/95 backdrop-blur border-t border-border"
-      style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)' }}
+      style={{ paddingBottom: '6px' }}
     >
       <div className="flex px-3">
         {NAV.map(({ href, icon: Icon, label }) => {
