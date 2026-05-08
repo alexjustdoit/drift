@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { schedulePush, cancelPush } from '@/lib/push'
+import { postSession, clearSession, fetchSession } from '@/lib/focus-session'
 
 type Phase = 'setup' | 'running' | 'paused' | 'done'
 
@@ -74,6 +75,7 @@ export default function FocusPage() {
     setTotal(secs)
     setPhase('running')
     schedulePush(endMs, task).catch(() => {})
+    postSession({ task, phase: 'running', end_time_ms: endMs, total_seconds: secs })
 
     // Create and unlock AudioContext during user gesture (required for iOS)
     if (!audioCtxRef.current) {
@@ -101,19 +103,22 @@ export default function FocusPage() {
   const pause = useCallback(() => {
     endTimeRef.current = null
     cancelPush().catch(() => {})
+    postSession({ task, phase: 'paused', total_seconds: total, remaining_seconds: remaining })
     setPhase('paused')
-  }, [])
+  }, [task, total, remaining])
 
   const resume = useCallback(() => {
     const endMs = Date.now() + remaining * 1000
     endTimeRef.current = endMs
     schedulePush(endMs, task).catch(() => {})
+    postSession({ task, phase: 'running', end_time_ms: endMs, total_seconds: total })
     setPhase('running')
-  }, [remaining, task])
+  }, [remaining, task, total])
 
   const reset = useCallback(() => {
     endTimeRef.current = null
     cancelPush().catch(() => {})
+    clearSession()
     setPhase('setup')
     setTask('')
     setRemaining(0)
@@ -160,11 +165,48 @@ export default function FocusPage() {
     if (phase === 'done') {
       playChime()
       notifyDone(task)
+      clearSession()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
   const progress = total > 0 ? ((total - remaining) / total) * 100 : 0
+
+  function restoreFromSession(session: Awaited<ReturnType<typeof fetchSession>>) {
+    if (!session) return
+    if (session.phase === 'running' && session.end_time_ms) {
+      const rem = Math.max(0, Math.ceil((session.end_time_ms - Date.now()) / 1000))
+      if (rem <= 0) return
+      endTimeRef.current = session.end_time_ms
+      setTask(session.task)
+      setTotal(session.total_seconds)
+      setRemaining(rem)
+      setPhase('running')
+    } else if (session.phase === 'paused' && session.remaining_seconds) {
+      setTask(session.task)
+      setTotal(session.total_seconds)
+      setRemaining(session.remaining_seconds)
+      setPhase('paused')
+    }
+  }
+
+  // Restore session from another device on mount
+  useEffect(() => {
+    fetchSession().then(restoreFromSession)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Pick up session when returning to this tab while in setup state
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === 'visible' && phase === 'setup') {
+        fetchSession().then(restoreFromSession)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
 
   // ── Setup ─────────────────────────────────────────────────────────────────────
 

@@ -141,6 +141,38 @@ def get_time_audit(days: int = Query(90, ge=1, le=365)):
     return notion.fetch_time_audit(days)
 
 
+# ── Focus session sync ────────────────────────────────────────────────────────
+
+class FocusSession(BaseModel):
+    task: str
+    phase: str  # 'running' | 'paused'
+    end_time_ms: Optional[float] = None
+    total_seconds: int
+    remaining_seconds: Optional[int] = None
+
+
+_active_session: Optional[dict] = None
+
+
+@app.post('/focus/session')
+def set_focus_session(session: FocusSession):
+    global _active_session
+    _active_session = session.model_dump()
+    return {'ok': True}
+
+
+@app.get('/focus/session')
+def get_focus_session():
+    return _active_session or {}
+
+
+@app.delete('/focus/session')
+def clear_focus_session():
+    global _active_session
+    _active_session = None
+    return {'ok': True}
+
+
 # ── Push notification endpoints ───────────────────────────────────────────────
 
 class PushSubscription(BaseModel):
