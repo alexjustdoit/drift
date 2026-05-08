@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
-import { Loader2, Sparkles } from 'lucide-react'
+import { BarChart2, Loader2, Sparkles } from 'lucide-react'
 import {
   CartesianGrid,
   Line,
@@ -16,8 +16,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { getAIReport, getLogs } from '@/lib/api'
-import type { DayLog } from '@/lib/types'
+import { getAIReport, getLogs, getTimeAudit, postTimeAudit } from '@/lib/api'
+import { Input } from '@/components/ui/input'
+import type { DayLog, TimeAuditEntry } from '@/lib/types'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -34,11 +35,11 @@ function pct(vals: (boolean | null | undefined)[]) {
 function StatCard({ label, value, unit }: { label: string; value: string | number | null; unit?: string }) {
   return (
     <Card>
-      <CardContent className="py-4">
-        <p className="text-xs text-muted-foreground mb-1">{label}</p>
-        <p className="text-2xl font-bold">
+      <CardContent className="py-5 px-5">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">{label}</p>
+        <p className="text-3xl font-bold leading-none">
           {value != null ? value : '—'}
-          {value != null && unit && <span className="text-sm font-normal text-muted-foreground ml-1">{unit}</span>}
+          {value != null && unit && <span className="text-base font-normal text-muted-foreground ml-1.5">{unit}</span>}
         </p>
       </CardContent>
     </Card>
@@ -70,18 +71,30 @@ function TrendChart({
 
   return (
     <Card>
-      <CardContent className="pt-4 pb-2">
-        <p className="text-xs text-muted-foreground mb-3">{label} (last 30 days)</p>
-        <ResponsiveContainer width="100%" height={80}>
+      <CardContent className="pt-5 pb-3 px-5">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-4">{label} · last 30 days</p>
+        <ResponsiveContainer width="100%" height={90}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-            <YAxis domain={[1, 5]} tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} width={16} />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+              tickLine={false}
+              axisLine={false}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              domain={[1, 5]}
+              tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+              tickLine={false}
+              axisLine={false}
+              width={18}
+            />
             <Tooltip
-              contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13 }}
               labelStyle={{ color: 'var(--muted-foreground)' }}
             />
-            <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+            <Line type="monotone" dataKey="value" stroke={color} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
           </LineChart>
         </ResponsiveContainer>
       </CardContent>
@@ -97,8 +110,8 @@ function OverviewTab({ logs }: { logs: DayLog[] }) {
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3">
         <StatCard label="Avg sleep" value={avg(recent.map(d => d.sleep_hours))?.toFixed(1) ?? null} unit="hrs" />
-        <StatCard label="Avg focus" value={avg(recent.map(d => d.focus_quality))?.toFixed(1) ?? null} unit="/5" />
-        <StatCard label="Avg mood" value={avg(recent.map(d => d.mood_eod))?.toFixed(1) ?? null} unit="/5" />
+        <StatCard label="Avg focus" value={avg(recent.map(d => d.focus_quality))?.toFixed(1) ?? null} unit="/ 5" />
+        <StatCard label="Avg mood" value={avg(recent.map(d => d.mood_eod))?.toFixed(1) ?? null} unit="/ 5" />
         <StatCard label="Meds adherence" value={pct(recent.map(d => d.meds_taken))} unit="%" />
         <StatCard label="Exercise rate" value={pct(recent.map(d => d.exercise))} unit="%" />
         <StatCard label="Days logged" value={recent.length} />
@@ -120,14 +133,20 @@ function PatternsTab({ logs }: { logs: DayLog[] }) {
 
 function WinLogTab({ logs }: { logs: DayLog[] }) {
   const wins = logs.filter(d => d.win_of_day).slice().reverse()
-  if (wins.length === 0) return <p className="text-sm text-muted-foreground py-4">No wins logged yet.</p>
+  if (wins.length === 0) {
+    return (
+      <div className="text-center py-10 text-muted-foreground">
+        <p className="text-sm">No wins logged yet. Capture your first win in the evening check-in.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-3">
       {wins.map(d => (
         <Card key={d.date}>
-          <CardContent className="py-4">
-            <p className="text-sm leading-relaxed">{d.win_of_day}</p>
+          <CardContent className="py-5">
+            <p className="leading-relaxed">{d.win_of_day}</p>
             <p className="text-xs text-muted-foreground mt-2">{format(parseISO(d.date), 'EEEE, MMM d')}</p>
           </CardContent>
         </Card>
@@ -153,19 +172,29 @@ function AIReportTab({ logs }: { logs: DayLog[] }) {
   }
 
   if (logs.length < 5) {
-    return <p className="text-sm text-muted-foreground py-4">Log at least 5 days before running the AI report.</p>
+    return (
+      <div className="text-center py-10 text-muted-foreground">
+        <p className="text-sm">Log at least 5 days before running the AI report.</p>
+      </div>
+    )
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <Button onClick={fetchReport} disabled={loading} variant="outline" className="gap-2 border-primary/30 hover:border-primary/60">
+      <Button
+        onClick={fetchReport}
+        disabled={loading}
+        variant="outline"
+        className="gap-2 h-11 border-primary/30 hover:border-primary/60 hover:bg-primary/5"
+      >
         {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary" />}
         Generate report (last 30 days)
       </Button>
       {report && (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="py-5">
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{report}</p>
+            <p className="text-xs font-medium text-primary/70 uppercase tracking-wider mb-3">AI Pattern Report</p>
+            <p className="leading-relaxed whitespace-pre-wrap">{report}</p>
           </CardContent>
         </Card>
       )}
@@ -173,13 +202,156 @@ function AIReportTab({ logs }: { logs: DayLog[] }) {
   )
 }
 
-function TimeAuditTab() {
+function TaskRow({ entry: e }: { entry: TimeAuditEntry }) {
+  const diff = e.actual_minutes - e.planned_minutes
   return (
-    <div>
-      <p className="text-sm text-muted-foreground py-4">
-        Time audit data from Telegram <Badge variant="secondary">/time</Badge> command.
-        Detailed breakdown coming soon.
-      </p>
+    <Card>
+      <CardContent className="py-4 px-4">
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-medium text-sm leading-snug">{e.task}</p>
+          {e.productivity != null && (
+            <Badge variant="secondary" className="text-xs shrink-0">{e.productivity}/5</Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+          <span>{e.planned_minutes}m planned</span>
+          <span>·</span>
+          <span>{e.actual_minutes}m actual</span>
+          {diff !== 0 && (
+            <span className={`font-medium ${diff > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+              {diff > 0 ? '+' : ''}{diff}m
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function TimeAuditTab() {
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const [entries, setEntries] = useState<TimeAuditEntry[]>([])
+  const [loadingEntries, setLoadingEntries] = useState(true)
+  const [task, setTask] = useState('')
+  const [planned, setPlanned] = useState('')
+  const [actual, setActual] = useState('')
+  const [productivity, setProductivity] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  function loadEntries() {
+    return getTimeAudit(30).then(setEntries).catch(() => {})
+  }
+
+  useEffect(() => {
+    loadEntries().finally(() => setLoadingEntries(false))
+  }, [])
+
+  async function submit() {
+    if (!task.trim() || !planned || !actual) return
+    setSaving(true)
+    try {
+      await postTimeAudit({
+        task: task.trim(),
+        date: today,
+        planned_minutes: Number(planned),
+        actual_minutes: Number(actual),
+        productivity: productivity ?? undefined,
+      })
+      await loadEntries()
+      setTask('')
+      setPlanned('')
+      setActual('')
+      setProductivity(null)
+    } catch {
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const todayEntries = entries.filter(e => (e.date ?? today) === today)
+  const pastEntries = entries.filter(e => (e.date ?? today) !== today)
+  const byDate = pastEntries.reduce((acc, e) => {
+    const d = e.date!
+    if (!acc[d]) acc[d] = []
+    acc[d].push(e)
+    return acc
+  }, {} as Record<string, TimeAuditEntry[]>)
+  const pastDates = Object.keys(byDate).sort().reverse().slice(0, 7)
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Log form */}
+      <Card>
+        <CardContent className="py-5 flex flex-col gap-3">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Log a task</p>
+          <Input placeholder="Task name" value={task} onChange={e => setTask(e.target.value)} />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Planned (min)</p>
+              <Input type="number" placeholder="30" value={planned} onChange={e => setPlanned(e.target.value)} />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">Actual (min)</p>
+              <Input type="number" placeholder="45" value={actual} onChange={e => setActual(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5">Productivity (optional)</p>
+            <div className="flex gap-2">
+              {[1, 2, 3, 4, 5].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setProductivity(productivity === n ? null : n)}
+                  className={`flex-1 h-10 rounded-lg text-sm font-medium border transition-colors ${
+                    productivity === n
+                      ? 'border-primary bg-primary/15 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Button
+            onClick={submit}
+            disabled={saving || !task.trim() || !planned || !actual}
+            className="h-11 mt-1"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Log task'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Entry list */}
+      {loadingEntries ? (
+        <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+      ) : entries.length === 0 ? (
+        <div className="text-center py-6 text-muted-foreground">
+          <p className="text-sm">No entries yet. Log your first task above.</p>
+        </div>
+      ) : (
+        <>
+          {todayEntries.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Today</p>
+              <div className="flex flex-col gap-2">
+                {todayEntries.map((e, i) => <TaskRow key={i} entry={e} />)}
+              </div>
+            </div>
+          )}
+          {pastDates.map(date => (
+            <div key={date}>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                {format(parseISO(date), 'EEEE, MMM d')}
+              </p>
+              <div className="flex flex-col gap-2">
+                {byDate[date].map((e, i) => <TaskRow key={i} entry={e} />)}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }
@@ -198,32 +370,40 @@ export default function InsightsPage() {
   }, [])
 
   return (
-    <div className="p-6 max-w-xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Insights</h1>
-        <p className="text-sm text-muted-foreground mt-1">Patterns from your daily log.</p>
+    <div className="max-w-xl mx-auto">
+      {/* Header */}
+      <div className="px-6 pt-8 pb-6 border-b border-border/50">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <BarChart2 className="w-5 h-5 text-primary" />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight">Insights</h1>
+        </div>
+        <p className="text-muted-foreground mt-2 ml-12">Patterns from your daily log.</p>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-        <Tabs defaultValue="overview">
-          <TabsList className="w-full grid grid-cols-5 mb-6">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="patterns">Patterns</TabsTrigger>
-            <TabsTrigger value="wins">Wins</TabsTrigger>
-            <TabsTrigger value="ai">AI</TabsTrigger>
-            <TabsTrigger value="time">Time</TabsTrigger>
-          </TabsList>
-          <TabsContent value="overview"><OverviewTab logs={logs} /></TabsContent>
-          <TabsContent value="patterns"><PatternsTab logs={logs} /></TabsContent>
-          <TabsContent value="wins"><WinLogTab logs={logs} /></TabsContent>
-          <TabsContent value="ai"><AIReportTab logs={logs} /></TabsContent>
-          <TabsContent value="time"><TimeAuditTab /></TabsContent>
-        </Tabs>
-      )}
+      <div className="p-6">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <Tabs defaultValue="overview">
+            <TabsList className="w-full grid grid-cols-5 mb-6 h-10">
+              <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
+              <TabsTrigger value="patterns" className="text-xs">Patterns</TabsTrigger>
+              <TabsTrigger value="wins" className="text-xs">Wins</TabsTrigger>
+              <TabsTrigger value="ai" className="text-xs">AI</TabsTrigger>
+              <TabsTrigger value="time" className="text-xs">Time</TabsTrigger>
+            </TabsList>
+            <TabsContent value="overview"><OverviewTab logs={logs} /></TabsContent>
+            <TabsContent value="patterns"><PatternsTab logs={logs} /></TabsContent>
+            <TabsContent value="wins"><WinLogTab logs={logs} /></TabsContent>
+            <TabsContent value="ai"><AIReportTab logs={logs} /></TabsContent>
+            <TabsContent value="time"><TimeAuditTab /></TabsContent>
+          </Tabs>
+        )}
+      </div>
     </div>
   )
 }
