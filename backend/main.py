@@ -298,6 +298,7 @@ def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
 def _send_daily_reminder(title: str, body: str) -> None:
     """Send a reminder push. Called by scheduled jobs."""
     global _stored_subscription
+    print(f'[reminder] firing: {title}, sub present: {bool(_stored_subscription)}', flush=True)
     if not _stored_subscription:
         return
     try:
@@ -307,14 +308,17 @@ def _send_daily_reminder(title: str, body: str) -> None:
             vapid_private_key=VAPID_PRIVATE_KEY,
             vapid_claims={'sub': VAPID_EMAIL},
         )
-    except WebPushException:
-        pass
+        print('[reminder] push sent ok', flush=True)
+    except WebPushException as e:
+        print(f'[reminder] WebPushException: {e}', flush=True)
+    except Exception as e:
+        print(f'[reminder] error: {e}', flush=True)
 
 
 def _schedule_daily_reminders() -> None:
-    """Schedule 9am morning and 10pm evening reminders in the user's timezone."""
     global _stored_timezone
     if not _stored_timezone:
+        print('[reminder] no timezone, skipping schedule', flush=True)
         return
     try:
         tz = pytz.timezone(_stored_timezone)
@@ -326,8 +330,9 @@ def _schedule_daily_reminders() -> None:
             lambda: _send_daily_reminder('🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
             'cron', hour=19, minute=6, timezone=tz, id='reminder_evening', replace_existing=True
         )
-    except Exception:
-        pass
+        print(f'[reminder] scheduled for 7:05pm and 7:06pm in {_stored_timezone}', flush=True)
+    except Exception as e:
+        print(f'[reminder] schedule error: {e}', flush=True)
 
 
 @app.post('/push/subscribe')
@@ -335,6 +340,7 @@ def push_subscribe(req: PushSubscribeRequest):
     global _stored_subscription, _stored_timezone
     _stored_subscription = req.subscription.model_dump()
     _stored_timezone = req.timezone
+    print(f'[push] subscribed, timezone={req.timezone}', flush=True)
     _persist_subscription()
     _schedule_daily_reminders()
     return {'ok': True}
