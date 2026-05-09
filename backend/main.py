@@ -324,13 +324,13 @@ def _schedule_daily_reminders() -> None:
         tz = pytz.timezone(_stored_timezone)
         scheduler.add_job(
             lambda: _send_daily_reminder('☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
-            'cron', hour=19, minute=5, timezone=tz, id='reminder_morning', replace_existing=True
+            'cron', hour=19, minute=15, timezone=tz, id='reminder_morning', replace_existing=True
         )
         scheduler.add_job(
             lambda: _send_daily_reminder('🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
-            'cron', hour=19, minute=6, timezone=tz, id='reminder_evening', replace_existing=True
+            'cron', hour=19, minute=18, timezone=tz, id='reminder_evening', replace_existing=True
         )
-        print(f'[reminder] scheduled for 7:05pm and 7:06pm in {_stored_timezone}', flush=True)
+        print(f'[reminder] scheduled for 7:15pm and 7:18pm in {_stored_timezone}', flush=True)
     except Exception as e:
         print(f'[reminder] schedule error: {e}', flush=True)
 
