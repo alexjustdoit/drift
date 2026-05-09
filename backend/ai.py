@@ -46,6 +46,24 @@ def generate_report(logs: list[dict]) -> str:
     return msg.content[0].text
 
 
+def extract_tasks(text: str) -> list[str]:
+    msg = _client.messages.create(
+        model=_MODEL,
+        max_tokens=512,
+        messages=[{
+            'role': 'user',
+            'content': (
+                'Extract actionable tasks from this brain dump. '
+                'Only include things that genuinely require doing something — skip observations, feelings, or vague ideas. '
+                'Each task should be a clear, specific action starting with a verb. '
+                'Return ONLY a JSON array of strings. If there are no clear tasks, return [].\n\n'
+                f'Brain dump:\n{text}'
+            ),
+        }],
+    )
+    return json.loads(msg.content[0].text)
+
+
 def surface_captures(captures: list[dict]) -> str:
     if not captures:
         return 'No captures yet.'

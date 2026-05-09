@@ -2,8 +2,11 @@ export interface LogEntry {
   date: string
   sleep_hours?: number
   sleep_quality?: number
+  alcohol_last_night?: number
   morning_energy?: number
   meds_taken?: boolean
+  stress_level?: number
+  stress_note?: string
   exercise?: boolean
   exercise_minutes?: number
   caffeine_cups?: number
@@ -27,6 +30,7 @@ export interface Capture {
   text: string
   date: string
   surfaced: boolean
+  archived: boolean
 }
 
 export interface TimeAuditEntry {

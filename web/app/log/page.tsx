@@ -47,6 +47,7 @@ function Rating({
   low = 'low',
   high = 'high',
   emoji = false,
+  anchors,
 }: {
   value: number | null
   onChange: (v: number) => void
@@ -54,6 +55,7 @@ function Rating({
   low?: string
   high?: string
   emoji?: boolean
+  anchors?: [string, string, string, string, string]
 }) {
   return (
     <div>
@@ -76,9 +78,14 @@ function Rating({
           </button>
         ))}
       </div>
-      <div className="flex justify-between mt-2 px-1">
-        <span className="text-xs text-muted-foreground/60">{low}</span>
-        <span className="text-xs text-muted-foreground/60">{high}</span>
+      <div className="flex justify-between mt-2 px-1 min-h-[1rem]">
+        {anchors && value !== null
+          ? <span className="w-full text-center text-xs font-medium text-primary">{anchors[value - 1]}</span>
+          : <>
+              <span className="text-xs text-muted-foreground/60">{low}</span>
+              <span className="text-xs text-muted-foreground/60">{high}</span>
+            </>
+        }
       </div>
     </div>
   )
@@ -110,8 +117,11 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 interface MorningData {
   sleep_hours: string
   sleep_quality: number | null
+  alcohol_last_night: number
   morning_energy: number | null
   meds_taken: boolean
+  stress_level: number | null
+  stress_note: string
 }
 
 function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEntry>) => void; initialData?: DayLog | null }) {
@@ -119,8 +129,11 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
   const [data, setData] = useState<MorningData>({
     sleep_hours: initialData?.sleep_hours != null ? String(initialData.sleep_hours) : '',
     sleep_quality: initialData?.sleep_quality ?? null,
+    alcohol_last_night: initialData?.alcohol_last_night ?? 0,
     morning_energy: initialData?.morning_energy ?? null,
     meds_taken: initialData?.meds_taken ?? false,
+    stress_level: initialData?.stress_level ?? null,
+    stress_note: initialData?.stress_note ?? '',
   })
 
   const steps = [
@@ -151,7 +164,28 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
             low="poor"
             high="great"
             emoji
+            anchors={['Terrible', 'Poor', 'Fair', 'Good', 'Great']}
           />
+          <div>
+            <p className="text-base font-medium mb-3">Alcohol last night</p>
+            <div className="flex gap-2">
+              {(['None', 'Light', 'Moderate', 'Heavy'] as const).map((label, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setData(d => ({ ...d, alcohol_last_night: i }))}
+                  className={cn(
+                    'flex-1 h-12 rounded-xl border-2 text-xs font-semibold transition-all',
+                    data.alcohol_last_night === i
+                      ? 'bg-primary border-primary text-primary-foreground scale-105'
+                      : 'border-border text-muted-foreground hover:border-primary/50'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       ),
     },
@@ -166,12 +200,39 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
             low="drained"
             high="charged"
             emoji
+            anchors={['Exhausted', 'Low', 'Okay', 'Good', 'Wired']}
           />
           <Toggle
             checked={data.meds_taken}
             onChange={v => setData(d => ({ ...d, meds_taken: v }))}
             label="Meds taken today"
           />
+        </div>
+      ),
+    },
+    {
+      title: 'Stress check',
+      content: (
+        <div className="flex flex-col gap-6">
+          <Rating
+            label="Anxiety / stress level"
+            value={data.stress_level}
+            onChange={v => setData(d => ({ ...d, stress_level: v }))}
+            low="calm"
+            high="maxed"
+            emoji
+            anchors={['Calm', 'Mild', 'Tense', 'High', 'Maxed']}
+          />
+          <div>
+            <p className="text-base font-medium mb-1">What&apos;s on your mind? <span className="text-muted-foreground font-normal">(optional)</span></p>
+            <Textarea
+              placeholder="Anything specific driving it..."
+              value={data.stress_note}
+              onChange={e => setData(d => ({ ...d, stress_note: e.target.value }))}
+              rows={3}
+              className="text-base resize-none"
+            />
+          </div>
         </div>
       ),
     },
@@ -184,8 +245,11 @@ function MorningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
       onSubmit({
         sleep_hours: data.sleep_hours ? parseFloat(data.sleep_hours) : undefined,
         sleep_quality: data.sleep_quality ?? undefined,
+        alcohol_last_night: data.alcohol_last_night ?? 0,
         morning_energy: data.morning_energy ?? undefined,
         meds_taken: data.meds_taken,
+        stress_level: data.stress_level ?? undefined,
+        stress_note: data.stress_note || undefined,
       })
     } else {
       setStep(s => s + 1)
@@ -235,6 +299,7 @@ function EveningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
             low="drained"
             high="charged"
             emoji
+            anchors={['Exhausted', 'Low', 'Okay', 'Good', 'Wired']}
           />
           <Rating
             label="Overall mood"
@@ -243,6 +308,7 @@ function EveningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
             low="rough"
             high="great"
             emoji
+            anchors={['Awful', 'Low', 'Neutral', 'Good', 'Great']}
           />
         </div>
       ),
@@ -257,6 +323,7 @@ function EveningFlow({ onSubmit, initialData }: { onSubmit: (data: Partial<LogEn
           low="scattered"
           high="locked in"
           emoji
+          anchors={['Scattered', 'Off', 'Okay', 'Sharp', 'Flow']}
         />
       ),
     },

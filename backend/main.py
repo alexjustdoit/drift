@@ -4,7 +4,9 @@ import asyncio
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+import requests
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -23,6 +25,7 @@ VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
 VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
 VAPID_EMAIL = os.getenv('VAPID_EMAIL', 'mailto:admin@example.com')
 PUSH_SUB_FILE = os.path.join(os.path.dirname(__file__), 'push_sub.json')
+TODOIST_API_TOKEN = os.getenv('TODOIST_API_TOKEN', '')
 
 app = FastAPI(title='Drift API')
 
@@ -87,6 +90,10 @@ class TimeAuditEntry(BaseModel):
     productivity: Optional[int] = None
 
 
+class TodoistTasksRequest(BaseModel):
+    tasks: List[str]
+
+
 # ── Log endpoints ─────────────────────────────────────────────────────────────
 
 @app.post('/log')
@@ -125,6 +132,42 @@ def surface_captures():
     captures = notion.fetch_captures(50)
     insight = ai.surface_captures(captures)
     return {'insight': insight}
+
+
+@app.patch('/capture/{page_id}/archive')
+def archive_capture(page_id: str):
+    notion.archive_capture(page_id)
+    return {'ok': True}
+
+
+@app.post('/capture/{page_id}/extract-tasks')
+def extract_tasks(page_id: str):
+    captures = notion.fetch_capture_by_id(page_id)
+    if not captures:
+        raise HTTPException(status_code=404, detail='Capture not found')
+    tasks = ai.extract_tasks(captures['text'])
+    return {'tasks': tasks}
+
+
+# ── Todoist endpoints ─────────────────────────────────────────────────────────
+
+@app.post('/todoist/tasks')
+def add_todoist_tasks(req: TodoistTasksRequest):
+    if not TODOIST_API_TOKEN:
+        raise HTTPException(status_code=503, detail='Todoist not configured')
+    headers = {'Authorization': f'Bearer {TODOIST_API_TOKEN}', 'Content-Type': 'application/json'}
+    failed = []
+    for task in req.tasks:
+        r = requests.post(
+            'https://api.todoist.com/rest/v2/tasks',
+            headers=headers,
+            json={'content': task},
+        )
+        if not r.ok:
+            failed.append(task)
+    if failed:
+        raise HTTPException(status_code=502, detail=f'Failed to add: {failed}')
+    return {'ok': True, 'added': len(req.tasks)}
 
 
 # ── AI endpoints ──────────────────────────────────────────────────────────────

@@ -83,10 +83,13 @@ def _parse_log_page(page: dict) -> dict:
 
     return {
         'date':             date_val('Date'),
-        'sleep_hours':      num('Sleep Hours'),
-        'sleep_quality':    num('Sleep Quality'),
-        'morning_energy':   num('Morning Energy'),
-        'meds_taken':       check('Meds Taken'),
+        'sleep_hours':        num('Sleep Hours'),
+        'sleep_quality':      num('Sleep Quality'),
+        'alcohol_last_night': num('Alcohol Last Night'),
+        'morning_energy':     num('Morning Energy'),
+        'meds_taken':         check('Meds Taken'),
+        'stress_level':       num('Stress Level'),
+        'stress_note':        text('Stress Note'),
         'exercise':         check('Exercise'),
         'exercise_minutes': num('Exercise Minutes'),
         'caffeine_cups':    num('Caffeine Cups'),
@@ -110,10 +113,16 @@ def build_log_properties(data: dict) -> dict:
         props['Sleep Hours'] = {'number': data['sleep_hours']}
     if 'sleep_quality' in data:
         props['Sleep Quality'] = {'number': data['sleep_quality']}
+    if 'alcohol_last_night' in data:
+        props['Alcohol Last Night'] = {'number': data['alcohol_last_night']}
     if 'morning_energy' in data:
         props['Morning Energy'] = {'number': data['morning_energy']}
     if 'meds_taken' in data:
         props['Meds Taken'] = {'checkbox': data['meds_taken']}
+    if 'stress_level' in data:
+        props['Stress Level'] = {'number': data['stress_level']}
+    if 'stress_note' in data:
+        props['Stress Note'] = {'rich_text': [{'text': {'content': data['stress_note']}}]}
     if 'exercise' in data:
         props['Exercise'] = {'checkbox': data['exercise']}
     if 'exercise_minutes' in data:
@@ -229,6 +238,7 @@ def fetch_captures(limit: int = 20) -> list[dict]:
     if not NOTION_CAP_DB_ID:
         return []
     results = _query(NOTION_CAP_DB_ID, {
+        'filter': {'property': 'Archived', 'checkbox': {'equals': False}},
         'sorts': [{'property': 'Date', 'direction': 'descending'}],
         'page_size': limit,
     })
@@ -243,8 +253,34 @@ def fetch_captures(limit: int = 20) -> list[dict]:
             'text':     text,
             'date':     d.get('start', ''),
             'surfaced': props.get('Surfaced', {}).get('checkbox', False),
+            'archived': props.get('Archived', {}).get('checkbox', False),
         })
     return out
+
+
+def archive_capture(page_id: str):
+    _patch_page(page_id, {'Archived': {'checkbox': True}})
+
+
+def fetch_capture_by_id(page_id: str) -> Optional[dict]:
+    res = requests.get(
+        f'https://api.notion.com/v1/pages/{page_id}',
+        headers=HEADERS,
+    )
+    if not res.ok:
+        return None
+    page = res.json()
+    props = page['properties']
+    items = props.get('Full Text', {}).get('rich_text', [])
+    text = items[0]['plain_text'] if items else ''
+    d = props.get('Date', {}).get('date', {})
+    return {
+        'id': page['id'],
+        'text': text,
+        'date': d.get('start', ''),
+        'surfaced': props.get('Surfaced', {}).get('checkbox', False),
+        'archived': props.get('Archived', {}).get('checkbox', False),
+    }
 
 
 # ── Time audit ────────────────────────────────────────────────────────────────

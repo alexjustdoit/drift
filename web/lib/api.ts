@@ -39,6 +39,18 @@ export const getCaptures = (limit = 20) =>
 export const getSurfacedInsight = () =>
   req<{ insight: string }>('/captures/surface')
 
+export const archiveCapture = (id: string) =>
+  req<{ ok: boolean }>(`/capture/${id}/archive`, { method: 'PATCH' })
+
+export const extractTasks = (id: string) =>
+  req<{ tasks: string[] }>(`/capture/${id}/extract-tasks`, { method: 'POST' })
+
+export const addTodoistTasks = (tasks: string[]) =>
+  req<{ ok: boolean; added: number }>('/todoist/tasks', {
+    method: 'POST',
+    body: JSON.stringify({ tasks }),
+  })
+
 // ── AI ────────────────────────────────────────────────────────────────────────
 
 export const postBreakdown = (task: string) =>
