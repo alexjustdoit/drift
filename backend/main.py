@@ -346,6 +346,24 @@ def push_subscribe(req: PushSubscribeRequest):
     return {'ok': True}
 
 
+@app.get('/push/debug')
+def push_debug():
+    jobs = [{'id': j.id, 'next_run': str(j.next_run_time)} for j in scheduler.get_jobs()]
+    return {
+        'subscription_present': bool(_stored_subscription),
+        'timezone': _stored_timezone,
+        'scheduled_jobs': jobs,
+        'vapid_configured': bool(VAPID_PRIVATE_KEY),
+    }
+
+
+@app.post('/push/test')
+def push_test():
+    """Fire a test push immediately to verify the whole pipeline works."""
+    _send_daily_reminder('Test notification', 'Push is working!')
+    return {'ok': True, 'subscription_present': bool(_stored_subscription)}
+
+
 @app.post('/push/timer')
 async def push_timer(req: TimerPushRequest):
     global _pending_push_task
