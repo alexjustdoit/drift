@@ -320,11 +320,11 @@ def _schedule_daily_reminders() -> None:
         tz = pytz.timezone(_stored_timezone)
         scheduler.add_job(
             lambda: _send_daily_reminder('☀️ Time for your daily log', 'Check in on sleep, energy, meds, and mood.'),
-            'cron', hour=9, minute=0, timezone=tz, id='reminder_morning', replace_existing=True
+            'cron', hour=18, minute=30, timezone=tz, id='reminder_morning', replace_existing=True
         )
         scheduler.add_job(
             lambda: _send_daily_reminder('🌙 Evening check-in ready', 'Log your movement, caffeine, wins, and where you left off.'),
-            'cron', hour=22, minute=0, timezone=tz, id='reminder_evening', replace_existing=True
+            'cron', hour=18, minute=35, timezone=tz, id='reminder_evening', replace_existing=True
         )
     except Exception:
         pass
