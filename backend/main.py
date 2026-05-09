@@ -256,26 +256,30 @@ class TimerPushRequest(BaseModel):
 _pending_push_task: Optional[asyncio.Task] = None
 
 # Store subscriptions with timezone for daily reminders
-_stored_subscription: Optional[Dict] = None
+_stored_subscriptions: List[Dict] = []
 _stored_timezone: Optional[str] = None
 
 
 def _persist_subscription() -> None:
     try:
         with open(PUSH_SUB_FILE, 'w') as f:
-            json.dump({'subscription': _stored_subscription, 'timezone': _stored_timezone}, f)
+            json.dump({'subscriptions': _stored_subscriptions, 'timezone': _stored_timezone}, f)
     except Exception:
         pass
 
 
 def _load_subscription() -> None:
-    global _stored_subscription, _stored_timezone
+    global _stored_subscriptions, _stored_timezone
     try:
         with open(PUSH_SUB_FILE) as f:
             data = json.load(f)
-        _stored_subscription = data.get('subscription')
+        # migrate old single-subscription format
+        if 'subscription' in data and data['subscription']:
+            _stored_subscriptions = [data['subscription']]
+        else:
+            _stored_subscriptions = data.get('subscriptions', [])
         _stored_timezone = data.get('timezone')
-        if _stored_subscription and _stored_timezone:
+        if _stored_subscriptions and _stored_timezone:
             _schedule_daily_reminders()
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
@@ -296,23 +300,30 @@ def _send_push(subscription: PushSubscription, title: str, body: str) -> None:
 
 
 def _send_daily_reminder(title: str, body: str) -> None:
-    """Send a reminder push. Called by scheduled jobs."""
-    global _stored_subscription
-    print(f'[reminder] firing: {title}, sub present: {bool(_stored_subscription)}', flush=True)
-    if not _stored_subscription:
+    """Send a reminder push to all registered subscriptions."""
+    global _stored_subscriptions
+    print(f'[reminder] firing: {title}, subs: {len(_stored_subscriptions)}', flush=True)
+    if not _stored_subscriptions:
         return
-    try:
-        webpush(
-            subscription_info={'endpoint': _stored_subscription['endpoint'], 'keys': _stored_subscription['keys']},
-            data=json.dumps({'title': title, 'body': body, 'url': '/log'}),
-            vapid_private_key=VAPID_PRIVATE_KEY,
-            vapid_claims={'sub': VAPID_EMAIL},
-        )
-        print('[reminder] push sent ok', flush=True)
-    except WebPushException as e:
-        print(f'[reminder] WebPushException: {e}', flush=True)
-    except Exception as e:
-        print(f'[reminder] error: {e}', flush=True)
+    dead_endpoints = []
+    for sub in _stored_subscriptions:
+        try:
+            webpush(
+                subscription_info={'endpoint': sub['endpoint'], 'keys': sub['keys']},
+                data=json.dumps({'title': title, 'body': body, 'url': '/log'}),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={'sub': VAPID_EMAIL},
+            )
+            print(f'[reminder] sent ok to ...{sub["endpoint"][-20:]}', flush=True)
+        except WebPushException as e:
+            print(f'[reminder] WebPushException: {e}', flush=True)
+            if e.response is not None and e.response.status_code in (404, 410):
+                dead_endpoints.append(sub['endpoint'])
+        except Exception as e:
+            print(f'[reminder] error: {e}', flush=True)
+    if dead_endpoints:
+        _stored_subscriptions = [s for s in _stored_subscriptions if s['endpoint'] not in dead_endpoints]
+        _persist_subscription()
 
 
 def _schedule_daily_reminders() -> None:
@@ -337,10 +348,15 @@ def _schedule_daily_reminders() -> None:
 
 @app.post('/push/subscribe')
 def push_subscribe(req: PushSubscribeRequest):
-    global _stored_subscription, _stored_timezone
-    _stored_subscription = req.subscription.model_dump()
+    global _stored_subscriptions, _stored_timezone
+    new_sub = req.subscription.model_dump()
+    # add if not already present (dedupe by endpoint)
+    if not any(s['endpoint'] == new_sub['endpoint'] for s in _stored_subscriptions):
+        _stored_subscriptions.append(new_sub)
+        print(f'[push] new subscription added, total={len(_stored_subscriptions)}, tz={req.timezone}', flush=True)
+    else:
+        print(f'[push] subscription already registered, total={len(_stored_subscriptions)}', flush=True)
     _stored_timezone = req.timezone
-    print(f'[push] subscribed, timezone={req.timezone}', flush=True)
     _persist_subscription()
     _schedule_daily_reminders()
     return {'ok': True}
@@ -350,7 +366,7 @@ def push_subscribe(req: PushSubscribeRequest):
 def push_debug():
     jobs = [{'id': j.id, 'next_run': str(j.next_run_time)} for j in scheduler.get_jobs()]
     return {
-        'subscription_present': bool(_stored_subscription),
+        'subscription_count': len(_stored_subscriptions),
         'timezone': _stored_timezone,
         'scheduled_jobs': jobs,
         'vapid_configured': bool(VAPID_PRIVATE_KEY),
@@ -361,7 +377,7 @@ def push_debug():
 def push_test():
     """Fire a test push immediately to verify the whole pipeline works."""
     _send_daily_reminder('Test notification', 'Push is working!')
-    return {'ok': True, 'subscription_present': bool(_stored_subscription)}
+    return {'ok': True, 'subscription_count': len(_stored_subscriptions)}
 
 
 @app.post('/push/timer')
